@@ -1,0 +1,266 @@
+VERSION = 1,
+
+
+option TAZC.SayRange
+{
+    type = integer,
+    min = 1,
+    max = 100,
+    default = 15,
+    page = TAZC,
+    translation = TAZC_SayRange,
+}
+
+option TAZC.WhisperRange
+{
+    type = integer,
+    min = 1,
+    max = 50,
+    default = 2,
+    page = TAZC,
+    translation = TAZC_WhisperRange,
+}
+
+option TAZC.YellRange
+{
+    type = integer,
+    min = 10,
+    max = 250,
+    default = 60,
+    page = TAZC,
+    translation = TAZC_YellRange,
+}
+
+option TAZC.LowRange
+{
+    type = integer,
+    min = 1,
+    max = 50,
+    default = 6,
+    page = TAZC,
+    translation = TAZC_LowRange,
+}
+
+option TAZC.MaxMessageLength
+{
+    type = integer,
+    min = 250,
+    max = 2000,
+    default = 500,
+    page = TAZC,
+    translation = TAZC_MaxMessageLength,
+}
+
+option TAZC.BubbleDuration
+{
+    type = integer,
+    min = 1,
+    max = 30,
+    default = 5,
+    page = TAZC,
+    translation = TAZC_BubbleDuration,
+}
+
+option TAZC.BubblesEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_BubblesEnabled,
+}
+
+option TAZC.BubbleAvatarMode
+{
+    type = enum,
+    numValues = 3,
+    default = 1,
+    page = TAZC,
+    translation = TAZC_BubbleAvatarMode,
+}
+
+option TAZC.TypingIndicatorsEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_TypingIndicatorsEnabled,
+}
+
+option TAZC.NameplatesEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_NameplatesEnabled,
+}
+
+option TAZC.NameplateVisibility
+{
+    type = enum,
+    numValues = 2,
+    default = 2,
+    page = TAZC,
+    translation = TAZC_NameplateVisibility,
+}
+
+option TAZC.HideOwnNameplate
+{
+    type = boolean,
+    default = false,
+    page = TAZC,
+    translation = TAZC_HideOwnNameplate,
+}
+
+option TAZC.BoredomReductionEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_BoredomReductionEnabled,
+}
+
+option TAZC.BoredomReductionAmount
+{
+    type = integer,
+    min = 0,
+    max = 100,
+    default = 100,
+    page = TAZC,
+    translation = TAZC_BoredomReductionAmount,
+}
+
+option TAZC.ZombieAttractionEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_ZombieAttractionEnabled,
+}
+
+option TAZC.OOCEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_OOCEnabled,
+}
+
+option TAZC.ALLEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_ALLEnabled,
+}
+
+option TAZC.AnonymityEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_AnonymityEnabled,
+}
+
+option TAZC.TranslationEnabled
+{
+    type = boolean,
+    default = false,
+    page = TAZC,
+    translation = TAZC_TranslationEnabled,
+}
+
+option TAZC.TranslationEchoEnabled
+{
+    type = boolean,
+    default = false,
+    page = TAZC,
+    translation = TAZC_TranslationEchoEnabled,
+}
+
+option TAZC.AddressedDistance
+{
+    type = integer,
+    min = 1,
+    max = 30,
+    default = 6,
+    page = TAZC,
+    translation = TAZC_AddressedDistance,
+}
+
+option TAZC.LanguagesEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_LanguagesEnabled,
+}
+
+option TAZC.LanguagesDeathReset
+{
+    type = enum,
+    numValues = 3,
+    default = 1,
+    page = TAZC,
+    translation = TAZC_LanguagesDeathReset,
+}
+
+option TAZC.ASLEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_ASLEnabled,
+}
+
+option TAZC.DeafTraitEnforced
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_DeafTraitEnforced,
+}
+
+option TAZC.AcquisitionSpeed
+{
+    type = enum,
+    numValues = 3,
+    default = 2,
+    page = TAZC,
+    translation = TAZC_AcquisitionSpeed,
+}
+
+option TAZC.SignGestureEnabled
+{
+    type = boolean,
+    default = true,
+    page = TAZC,
+    translation = TAZC_SignGestureEnabled,
+}
+
+option TAZC.SignGestureCooldown
+{
+    type = integer,
+    min = 1,
+    max = 30,
+    default = 5,
+    page = TAZC,
+    translation = TAZC_SignGestureCooldown,
+}
+
+option TAZC.SignGestureDefault
+{
+    type = enum,
+    numValues = 10,
+    default = 1,
+    page = TAZC,
+    translation = TAZC_SignGestureDefault,
+}
+
+option TAZC.SignGestureYell
+{
+    type = enum,
+    numValues = 10,
+    default = 7,
+    page = TAZC,
+    translation = TAZC_SignGestureYell,
+}

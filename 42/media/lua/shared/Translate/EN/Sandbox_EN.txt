@@ -1,0 +1,122 @@
+Sandbox_EN = {
+    Sandbox_TAZC = "Terror AustraliZ Chat",
+
+    Sandbox_TAZC_SayRange = "Say Range",
+    Sandbox_TAZC_SayRange_tooltip = "Distance in tiles for normal speech (/say). Also used for emotes and /do. <LINE> Recommended: 15",
+
+    Sandbox_TAZC_WhisperRange = "Whisper Range",
+    Sandbox_TAZC_WhisperRange_tooltip = "Distance in tiles for whispers (/whisper). <LINE> Recommended: 2",
+
+    Sandbox_TAZC_YellRange = "Yell Range",
+    Sandbox_TAZC_YellRange_tooltip = "Distance in tiles for yelling (/yell). Also used for OOC. <LINE> Recommended: 60",
+
+    Sandbox_TAZC_LowRange = "Low Range",
+    Sandbox_TAZC_LowRange_tooltip = "Distance in tiles for subdued speech (/low). <LINE> Recommended: 6",
+
+    Sandbox_TAZC_MaxMessageLength = "Max Message Length",
+    Sandbox_TAZC_MaxMessageLength_tooltip = "Longest a single chat message may be, in characters. Vanilla PZ caps its chat box near 250; this lifts that limit. <LINE> Messages past 2000 aren't allowed -- and very long ones make tall speech bubbles. <LINE> Takes effect on relog. <LINE> Recommended: 500",
+
+    Sandbox_TAZC_BubbleDuration = "Bubble Duration",
+    Sandbox_TAZC_BubbleDuration_tooltip = "How long speech bubbles stay visible (seconds). <LINE> Recommended: 5",
+
+    Sandbox_TAZC_BubblesEnabled = "Speech Bubbles",
+    Sandbox_TAZC_BubblesEnabled_tooltip = "Show speech bubbles above players. Disable for chat panel only.",
+
+    Sandbox_TAZC_BubbleAvatarMode = "Bubble Portrait",
+    Sandbox_TAZC_BubbleAvatarMode_tooltip = "What fills the portrait box in speech bubbles. <LINE> <LINE> Character Model: the speaker's 3D character (default). <LINE> Custom Portraits: players may set a 60x80 PNG portrait (right-click your character -> Choose Chat Avatar). Every portrait waits for an admin or moderator's approval before anyone else sees it; speakers without one keep the 3D model. Masked or distant speakers never show a portrait. <LINE> Off: no portrait box at all.",
+    Sandbox_TAZC_BubbleAvatarMode_option1 = "Character Model",
+    Sandbox_TAZC_BubbleAvatarMode_option2 = "Custom Portraits",
+    Sandbox_TAZC_BubbleAvatarMode_option3 = "Off",
+
+    Sandbox_TAZC_TypingIndicatorsEnabled = "Typing Indicators",
+    Sandbox_TAZC_TypingIndicatorsEnabled_tooltip = "Show animated dots when nearby players are typing.",
+
+    Sandbox_TAZC_NameplatesEnabled = "Show Nameplates",
+    Sandbox_TAZC_NameplatesEnabled_tooltip = "Display character names and taglines above players. <LINE> Set FALSE to disable ALL nameplates (yours and others).",
+
+    Sandbox_TAZC_NameplateVisibility = "Nameplate Visibility",
+    Sandbox_TAZC_NameplateVisibility_tooltip = "Controls when nameplates appear above other players. <LINE> <LINE> Always: Nameplates visible for all nearby players (through walls). <LINE> Line of Sight: Nameplates only visible when you have direct line of sight to the player. Fades out smoothly when a player moves behind cover. <LINE> <LINE> Only applies when Show Nameplates is enabled.",
+    Sandbox_TAZC_NameplateVisibility_option1 = "Always",
+    Sandbox_TAZC_NameplateVisibility_option2 = "Line of Sight",
+
+    Sandbox_TAZC_HideOwnNameplate = "Hide Own Nameplate",
+    Sandbox_TAZC_HideOwnNameplate_tooltip = "Hide your own nameplate while still seeing others. <LINE> Only works when Show Nameplates is TRUE.",
+
+    Sandbox_TAZC_BoredomReductionEnabled = "Boredom Reduction",
+    Sandbox_TAZC_BoredomReductionEnabled_tooltip = "Hearing others talk reduces boredom. Rewards RP engagement.",
+
+    Sandbox_TAZC_BoredomReductionAmount = "Boredom Reduction Amount",
+    Sandbox_TAZC_BoredomReductionAmount_tooltip = "Percentage of boredom removed per message heard (0-100). <LINE> Recommended: 100",
+
+    Sandbox_TAZC_ZombieAttractionEnabled = "Zombie Attraction",
+    Sandbox_TAZC_ZombieAttractionEnabled_tooltip = "Speaking attracts nearby zombies. Yelling attracts more than whispering.",
+
+    Sandbox_TAZC_OOCEnabled = "Allow OOC Chat",
+    Sandbox_TAZC_OOCEnabled_tooltip = "Enable /ooc channel for out-of-character communication (proximity-based). Disable for strict roleplay servers.",
+
+    Sandbox_TAZC_ALLEnabled = "Allow ALL Chat",
+    Sandbox_TAZC_ALLEnabled_tooltip = "Enable /all channel for server-wide out-of-character communication. Disable to restrict OOC to proximity only.",
+
+    Sandbox_TAZC_AnonymityEnabled = "Anonymity System",
+    Sandbox_TAZC_AnonymityEnabled_tooltip = "Masked players appear as 'A masked figure'. Distant speakers appear as 'Someone'. Disable to always show real names.",
+
+    Sandbox_TAZC_TranslationEnabled = "OOC Translator (/translate)",
+    Sandbox_TAZC_TranslationEnabled_tooltip = "Enable the player-facing /translate command (English<->Turkish, self-display only). <LINE> Experimental: output has not been validated by native speakers. <LINE> Default OFF.",
+
+    Sandbox_TAZC_TranslationEchoEnabled = "Translation Echo",
+    Sandbox_TAZC_TranslationEchoEnabled_tooltip = "Broadcast a '[Translation]' line alongside translated speech. <LINE> Requires OOC Translator. Reveals content the babble barrier deliberately hides -- safe default is babble. <LINE> Default OFF.",
+    Sandbox_TAZC_AddressedDistance = "Addressed Distance",
+    Sandbox_TAZC_AddressedDistance_tooltip = "Proximity speech heard from within this many tiles counts as addressed to the listener (full language-learning weight); further out is overhearing (reduced weight). <LINE> Recommended: 6",
+    Sandbox_TAZC_LanguagesEnabled = "Language Barrier",
+    Sandbox_TAZC_LanguagesEnabled_tooltip = "Master switch for the roleplay language system. When enabled, speech in a character language reaches listeners as babble until they pick the words up by listening. <LINE> Set FALSE to run Terror AustraliZ Chat as a chat mod only: everyone's speech renders plainly, no babble, no word-learning. Progress already earned is kept, just dormant, and returns if re-enabled.",
+
+    Sandbox_TAZC_ASLEnabled = "ASL Enabled",
+    Sandbox_TAZC_ASLEnabled_tooltip = "Allow American Sign Language as a speaking language. Signing needs a free hand and line of sight to receive -- it never transmits over radio. <LINE> Disabling this stops new speaking selection; anyone who already knows ASL keeps that knowledge, just dormant.",
+
+    Sandbox_TAZC_DeafTraitEnforced = "Deaf Trait Enforced",
+    Sandbox_TAZC_DeafTraitEnforced_tooltip = "A character with the Deaf trait hears no spoken chat content on any channel, and can read signing fully (subject to sight) or lips partially (a Deaf character who can see a nearby speaker, real lipreading is always lossy). <LINE> Disable to ignore the Deaf trait entirely -- everyone hears normally regardless of trait.",
+
+    Sandbox_TAZC_LanguagesDeathReset = "Languages After Death",
+    Sandbox_TAZC_LanguagesDeathReset_tooltip = "Language knowledge is tied to the account, so a brand-new character starts already carrying every word the previous one earned. This controls what happens when that carry-over is detected. <LINE> <LINE> Notify: the player is told what carried over, with the /forget commands to let it go themselves; online admins get a ready-made /lang reset line. Honor-system -- fits most RP servers. <LINE> Auto Reset: the old life's languages are wiped automatically. Strictest new-life immersion. <LINE> Off: new characters quietly inherit their predecessor's tongues -- use if reincarnation is your server's fiction. <LINE> Recommended: Notify",
+    Sandbox_TAZC_LanguagesDeathReset_option1 = "Notify",
+    Sandbox_TAZC_LanguagesDeathReset_option2 = "Auto Reset",
+    Sandbox_TAZC_LanguagesDeathReset_option3 = "Off",
+
+    Sandbox_TAZC_AcquisitionSpeed = "Learning Speed",
+    Sandbox_TAZC_AcquisitionSpeed_tooltip = "How fast characters pick up languages by listening. Rescales how many hearings a word needs to click, settle in, and become speakable -- and how long it lingers before fading -- without changing how learning feels. <LINE> <LINE> Slow: about 1.5x the listening. For long-arc servers where fluency should take months. <LINE> Default: the shipped calibration -- weeks of regular play. <LINE> Fast: about half the listening. For shorter campaigns or casual RP.",
+    Sandbox_TAZC_AcquisitionSpeed_option1 = "Slow",
+    Sandbox_TAZC_AcquisitionSpeed_option2 = "Default",
+    Sandbox_TAZC_AcquisitionSpeed_option3 = "Fast",
+
+    Sandbox_TAZC_SignGestureEnabled = "Signing Gestures",
+    Sandbox_TAZC_SignGestureEnabled_tooltip = "When a signed (ASL) message is sent, play a hand-gesture emote on the signer's own avatar. Presentation only -- no gameplay reads it, and it never affects other players.",
+
+    Sandbox_TAZC_SignGestureCooldown = "Signing Gesture Cooldown",
+    Sandbox_TAZC_SignGestureCooldown_tooltip = "Minimum seconds between signing-gesture emotes on the same character, so a burst of signed messages doesn't windmill the avatar's hands. <LINE> Recommended: 5",
+
+    Sandbox_TAZC_SignGestureDefault = "Signing Gesture (Say/Whisper/Low)",
+    Sandbox_TAZC_SignGestureDefault_tooltip = "The emote played on a signer's own avatar for ordinary signed speech (say, whisper, low) -- the subtle version. <LINE> Purely cosmetic; tune to taste.",
+    Sandbox_TAZC_SignGestureDefault_option1 = "Shrug",
+    Sandbox_TAZC_SignGestureDefault_option2 = "Wave Hi",
+    Sandbox_TAZC_SignGestureDefault_option3 = "Thank You",
+    Sandbox_TAZC_SignGestureDefault_option4 = "Come Here",
+    Sandbox_TAZC_SignGestureDefault_option5 = "Stop",
+    Sandbox_TAZC_SignGestureDefault_option6 = "Salute",
+    Sandbox_TAZC_SignGestureDefault_option7 = "Surrender",
+    Sandbox_TAZC_SignGestureDefault_option8 = "Yes (Nod)",
+    Sandbox_TAZC_SignGestureDefault_option9 = "No (Shake)",
+    Sandbox_TAZC_SignGestureDefault_option10 = "Thumbs Up",
+
+    Sandbox_TAZC_SignGestureYell = "Signing Gesture (Yell / Sign-Shout)",
+    Sandbox_TAZC_SignGestureYell_tooltip = "The emote played on a signer's own avatar for sign-shout (yell) -- the big, emphatic, visually-conspicuous version. <LINE> Purely cosmetic; tune to taste.",
+    Sandbox_TAZC_SignGestureYell_option1 = "Shrug",
+    Sandbox_TAZC_SignGestureYell_option2 = "Wave Hi",
+    Sandbox_TAZC_SignGestureYell_option3 = "Thank You",
+    Sandbox_TAZC_SignGestureYell_option4 = "Come Here",
+    Sandbox_TAZC_SignGestureYell_option5 = "Stop",
+    Sandbox_TAZC_SignGestureYell_option6 = "Salute",
+    Sandbox_TAZC_SignGestureYell_option7 = "Surrender",
+    Sandbox_TAZC_SignGestureYell_option8 = "Yes (Nod)",
+    Sandbox_TAZC_SignGestureYell_option9 = "No (Shake)",
+    Sandbox_TAZC_SignGestureYell_option10 = "Thumbs Up",
+}
