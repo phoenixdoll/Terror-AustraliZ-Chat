@@ -493,7 +493,8 @@ local function onChatMessage(msgData)
     end, nil)
 
     -- Apply anonymity for IC channels (not OOC, admin, etc.)
-    local icChannels = {say = true, yell = true, low = true, whisper = true, emote = true, ["do"] = true}
+    local icChannels = {say = true, yell = true, low = true, whisper = true, emote = true, ["do"] = true,
+        emoteLong = true, doLong = true}
     if icChannels[msgData.channel] then
         TAZC_Anonymity.anonymizeMessageData(msgData, player)
         if msgData.isAnonymous then
@@ -602,9 +603,9 @@ local function onChatMessage(msgData)
     end, nil)
 
     -- Show bubble
-    if player and msgData.channel == "emote" then
+    if player and (msgData.channel == "emote" or msgData.channel == "emoteLong") then
         showEmoteBubble(player, msgData.characterName, msgData.message)
-    elseif player and msgData.channel == "do" then
+    elseif player and (msgData.channel == "do" or msgData.channel == "doLong") then
         showDoBubble(player, msgData.message)
     elseif player then
         local bubbleChannels = {say = true, yell = true, low = true}

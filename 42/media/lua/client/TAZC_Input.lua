@@ -77,6 +77,8 @@ local PREFIXES = {
     {"/em ", "emote"},
     {"/e ", "emote"},
     {"/do ", "do"},
+    {"/melong ", "emoteLong"},
+    {"/dolong ", "doLong"},
     {"/event ", "event"},
     {"/you ", "mood"},
     {"/ooc ", "ooc"},
@@ -282,6 +284,8 @@ addUsage({"/yell", "/y"}, "Usage: /yell <message>  (or /y) -- a shout that carri
 addUsage({"/low", "/l"}, "Usage: /low <message>  (or /l) -- kept low, for those close by.")
 addUsage({"/me", "/em", "/e"}, "Usage: /me <action>  (or /em, /e) -- an action, shown as *Name waves*.")
 addUsage({"/do"}, "Usage: /do <text> -- narrate the scene for everyone nearby.")
+addUsage({"/melong"}, "Usage: /melong <action> -- same as /me, but seen at yell range.")
+addUsage({"/dolong"}, "Usage: /dolong <text> -- same as /do, but heard at yell range.")
 addUsage({"/event"}, "Usage: /event <narration> -- storyteller's narration that carries far (admins).")
 addUsage({"/you"}, "Usage: /you <feeling> -- a private note of how you're feeling; only you see it.")
 addUsage({"/ooc", "/o"}, "Usage: /ooc <message>  (or /o) -- out-of-character, heard nearby.")
@@ -303,6 +307,7 @@ local TAZC_HELP = {
     "  /whisper /low /say /yell <message> -- quiet through loud (or /w /l /s /y)",
     "  /me <action> -- an action, shown as *Name waves* (or /em, /e)",
     "  /do <text> -- narrate the scene for everyone nearby",
+    "  /melong /dolong -- same as /me and /do, but heard/seen at yell range",
     "  /you <feeling> -- a private note of how you're feeling; only you see it",
     "  /tell <name> <message> -- address someone directly (or /t)",
     "  /roll 2d6 -- roll dice; the result lands in OOC (or /r)",

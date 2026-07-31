@@ -105,6 +105,12 @@ local SANDBOX_SPECS = {
     { section = "Ranges", field = "emote", sandboxKey = "SayRange", default = 15 },
     { section = "Ranges", field = "do",    sandboxKey = "SayRange", default = 15 },
 
+    -- Long-range roleplay channels: /melong and /dolong, same format and
+    -- meaning as /me and /do, just carrying as far as a yell so a scene can
+    -- be narrated/acted out across a wider area. Derive from yell range.
+    { section = "Ranges", field = "emoteLong", sandboxKey = "YellRange", default = 60 },
+    { section = "Ranges", field = "doLong",    sandboxKey = "YellRange", default = 60 },
+
     -- Meta channels (OOC derives from yell)
     { section = "Ranges", field = "ooc", sandboxKey = "YellRange", default = 60 },
 
@@ -269,7 +275,9 @@ TAZC_Config.ChannelColors = {
 
     -- Roleplay channels
     emote = TAZC_Core.Colors.EMOTE_AMBER, -- Soft amber/peach - warm action color
+    emoteLong = TAZC_Core.Colors.EMOTE_AMBER, -- Same as /me -- only range differs
     ["do"] = {200, 180, 255},       -- Soft lavender - environmental/narrative
+    doLong = {200, 180, 255},       -- Same as /do -- only range differs
     mood = TAZC_Core.Colors.MOOD_PURPLE,  -- Purple/lavender (AE6DB5)
     event = {235, 145, 205},        -- Orchid/rose - admin event narration
 
@@ -299,7 +307,9 @@ TAZC_Config.ChannelTags = {
     yell = "[YELL]",
     low = "[low]",
     emote = "",                     -- Format: *Name action*
+    emoteLong = "",                 -- Format: *Name action*, same as /me
     ["do"] = "",                    -- Format: just the narration text
+    doLong = "",                    -- Format: just the narration text, same as /do
     mood = "",                      -- Format: internal thought
     event = "[Event]",              -- Admin event narration (TAZC_Server scrubs the name)
     ooc = "[OOC]",

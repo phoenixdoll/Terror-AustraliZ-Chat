@@ -268,6 +268,8 @@ releases.
 | `/t` `/tell` `<name>` | 15 tiles | Address someone directly (full acquisition weight for them; others overhear at 0.6×) |
 | `/me` `/em` `/e` | 15 tiles | Action emote: `*Name waves*` |
 | `/do` | 15 tiles | Environment narration |
+| `/melong` | 60 tiles | Action emote, same as `/me` but carrying to yell range |
+| `/dolong` | 60 tiles | Environment narration, same as `/do` but carrying to yell range |
 | `/you` | Self only | A private note of how you're feeling -- only you see it |
 | `/ooc` `/o` | 60 tiles | Out of character (heard nearby) |
 | `/all` | Server-wide | Out of character, the whole server hears |

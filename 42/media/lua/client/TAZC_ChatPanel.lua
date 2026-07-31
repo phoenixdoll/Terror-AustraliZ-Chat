@@ -121,6 +121,8 @@ local channelToTab = {
     low = 1,
     emote = 1,
     ["do"] = 1,
+    emoteLong = 1,
+    doLong = 1,
     mood = 1,
     me = 1,
     pm = 1,
@@ -338,7 +340,7 @@ local function computeMessageLines(msg, panelWidth, margin)
     -- ========================================
     -- EMOTE FORMAT: *CharacterName action*
     -- ========================================
-    if msg.channel == "emote" then
+    if msg.channel == "emote" or msg.channel == "emoteLong" then
         local emoteText = "*" .. msg.characterName .. " " .. msg.message .. "*"
         return narrationLines(emoteText, msg, tagColor, font, textManager, panelWidth, margin)
     end
@@ -346,7 +348,7 @@ local function computeMessageLines(msg, panelWidth, margin)
     -- ========================================
     -- DO FORMAT: Environment narration
     -- ========================================
-    if msg.channel == "do" then
+    if msg.channel == "do" or msg.channel == "doLong" then
         return narrationLines(msg.message, msg, tagColor, font, textManager, panelWidth, margin)
     end
 
