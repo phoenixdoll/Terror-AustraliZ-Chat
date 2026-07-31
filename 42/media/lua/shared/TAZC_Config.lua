@@ -459,7 +459,8 @@ TAZC_Config.SignGesture = {}
 
 -- ============================================================================
 -- SERVER-SIDE LOGGING
--- For MongooseBot integration and audit trails
+-- Chat/radio history to disk for audit trails and external tooling (e.g. a
+-- Discord relay bot) to tail.
 -- ============================================================================
 
 TAZC_Config.Log = {

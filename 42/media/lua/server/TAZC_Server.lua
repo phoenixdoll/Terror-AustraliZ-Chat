@@ -30,6 +30,7 @@
 local TAZC_Core = require("TAZC_Core")
 local TAZC_Config = require("TAZC_Config")
 local TAZC_Radio = require("TAZC_Radio")
+local TAZC_Sanitize = require("TAZC_Sanitize")
 local TAZC_Lang = require("TAZC_Lang")
 local TAZC_LangCommands = require("TAZC_LangCommands")
 local TAZC_LangRegistry = require("TAZC_LangRegistry")
@@ -785,7 +786,7 @@ local function buildMessageData(player, channel, message)
 end
 
 -- ============================================================================
--- LOGGING (for MongooseBot integration)
+-- LOGGING
 -- ============================================================================
 
 local function logMessage(msgData)
@@ -1338,7 +1339,7 @@ local function buildAndLog(ctx)
         msgData.isFumble = ctx.args.isFumble or false
     end
 
-    -- Log for MongooseBot -- but not private channels.
+    -- Log to disk -- but not private channels.
     -- 'mood' (/you) is internal monologue, self-only, never transmitted to
     -- other players. Logging it to disk is a privacy leak. Skip.
     if channel ~= "mood" then
@@ -1666,8 +1667,26 @@ local function routeRadio(ctx)
     local doBabble = ctx.doBabble
     local speakerUsername = msgData.username
 
+    -- Emotes never transmit as themselves -- an action isn't sound. But a
+    -- speaker can carry a quoted line of actual dialogue over the radio from
+    -- inside an emote (`/me scratches nose. "This is a message I want on the
+    -- radio."`): pull just that quoted speech out and route it exactly like
+    -- a /say from here down (packet loss, language barrier, relay, bridge --
+    -- every one of them, since it IS the character's own spoken words, not a
+    -- pretend voice). The plain narration and any **mood** aside are never
+    -- radio content; extractQuoted() only looks inside "...". No quotes in
+    -- the message means no radio attempt at all, same as an emote today.
+    local EMOTE_RADIO_CHANNELS = {emote = true, emoteLong = true}
     local radioChannels = {say = true, yell = true, low = true, whisper = true}
-    if not radioChannels[channel] then
+    if EMOTE_RADIO_CHANNELS[channel] then
+        local quotedSpeech = TAZC_Sanitize.extractQuoted(message)
+        if not quotedSpeech then
+            dbg("processMessage: skipping radio (emote has no quoted speech)")
+            return
+        end
+        message = quotedSpeech
+        channel = "say"
+    elseif not radioChannels[channel] then
         dbg("processMessage: skipping radio (non-IC channel)")
         return
     end

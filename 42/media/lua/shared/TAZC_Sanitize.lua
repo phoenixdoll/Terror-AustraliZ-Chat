@@ -150,4 +150,36 @@ function M.restore(text, blocks, order)
     return text
 end
 
+-- =============================================================================
+-- extractQuoted(text) -> string or nil
+-- =============================================================================
+-- Pulls the spoken-aloud portion out of an action line -- e.g. /me text like
+-- `scratches nose. "This is a message I want on the radio."` -- for TAZC_Server's
+-- radio routing (an emote otherwise never transmits: see routeRadio's
+-- radioChannels gate). Only content inside "..." counts as speech; the plain
+-- narration and any **mood** aside are never radio content, so a mood marker
+-- typed INSIDE a quote is stripped too, defensively, even though real RP
+-- style would never nest one there. Multiple quoted spans in one line
+-- concatenate (space-joined) into a single transmission -- one /me is one
+-- utterance, matching how every other channel sends one radio message per
+-- player message.
+-- Returns nil (not "") when there's nothing to transmit, so callers can
+-- `if not extractQuoted(x) then return end` without a second emptiness check.
+
+function M.extractQuoted(text)
+    if type(text) ~= "string" or #text == 0 then return nil end
+
+    local spans = {}
+    for content in text:gmatch('"(.-)"') do
+        content = content:gsub("%*%*.-%*%*", "")
+        content = content:match("^%s*(.-)%s*$")
+        if content ~= "" then
+            spans[#spans + 1] = content
+        end
+    end
+
+    if #spans == 0 then return nil end
+    return table.concat(spans, " ")
+end
+
 return M

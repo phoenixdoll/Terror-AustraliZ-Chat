@@ -386,6 +386,15 @@ Signed languages (ASL) never transmit over radio -- a radio carries sound,
 not sight. An active broadcast on a signed language is blocked with a
 message to the signer instead.
 
+An emote (`/me`, `/melong`) never transmits as itself -- an action isn't
+sound. But a line wrapped in `"quotes"` inside one is treated as your
+character actually speaking it aloud, and carries over the radio exactly
+like `/say` would (packet loss, the language barrier, everything): `/me
+scratches nose. "This is a message I want on the radio."` sends only the
+quoted sentence. The action text and any `**mood**` aside never transmit,
+quoted or not. No quotes in the emote means no radio attempt at all, same
+as before.
+
 ### Boredom Reduction
 Hearing other players talk reduces boredom. Rewards social interaction.
 
