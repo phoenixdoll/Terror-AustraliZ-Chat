@@ -9,17 +9,18 @@ Terror AustraliZ community.
 ## About this fork
 
 Terror AustraliZ Chat is a fork of **MongooseChat**, originally created by
-**Kialae (Mongoose Server)**. The original mod disappeared from the Steam
-Workshop; this fork picks up the same MIT-licensed codebase, rebrands it for
-Terror AustraliZ, and continues development from there. Full credit for the
-original design, the language-acquisition system, ASL support, and the vast
-majority of the code in this mod belongs to Kialae -- see [LICENSE](LICENSE).
+**Kialae (Mongoose Server)**. The original mod briefly disappeared from the 
+Steam Workshop and like a child playing peekaboo, I panicked; this fork 
+picks up the same MIT-licensed codebase, rebrands it for Terror AustraliZ, 
+and continues development from there. Full credit for the original design, 
+the language-acquisition system, ASL support, and the vast majority of the 
+code in this mod belongs to Kialae: see [LICENSE](LICENSE).
 
 This is a straight, mechanically-renamed port as of v0.1.0: every feature
 below carried over from MongooseChat unchanged in behaviour, only the mod's
 identifiers (mod id, sandbox namespace, network channels, file names) were
-updated from `MongooseChat`/`MC_` to `TAZC`/`TAZC_`. It has not yet been
-tested in a live Build 42 server. The version-history blockquotes below are
+updated from `MongooseChat`/`MC_` to `TAZC`/`TAZC_`. It has been tested 
+in a live Build 42.20 server. The version-history blockquotes below are
 preserved from the original MongooseChat README for feature context; they
 describe the upstream history this fork branched from, not TAZC-specific
 releases.
