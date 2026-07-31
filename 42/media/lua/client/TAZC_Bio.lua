@@ -899,7 +899,7 @@ function TAZC_Bio.saveName(text)
     end)
 
     safeExec(function()
-        local shown = (surname ~= "" ) and (forename .. " " .. surname) or forename
+        local shown = (surname ~= "") and (forename .. " " .. surname) or forename
         player:addLineChatElement("Name changed to: " .. shown, 0.5, 1, 0.5)
     end)
 
