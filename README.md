@@ -276,6 +276,7 @@ releases.
 | `/roll` `/r` | 60 tiles | Roll dice (`2d6`, `d20`, `4d10+4`); the result lands in OOC |
 | `/event` | 120 tiles | **Admin:** storyteller's narration for server events -- double yell range, rendered nameless as `[Event]` so the narrator stays unseen (v8.16.2+) |
 | `/bio` `/tagline` | -- | Set character tagline |
+| `/name <new name>` | -- | Rename your own character (e.g. `/name Jane Doe`) -- a real rename, not a cosmetic alias; see *Character Renaming* below |
 | `/hue` | -- | Set your chat-name color: `/hue #RRGGBB` or `/hue r,g,b` (0-255) -- too-dark shades are refused; `/hue reset` returns your natural shade (v8.16.2+) |
 | *Choose Chat Avatar...* | -- | Not a slash command: right-click your own character. Pick a custom speech-bubble portrait -- needs the **Bubble Portrait: Custom Portraits** sandbox mode (v8.16.2+; see *Chat Avatars* below) |
 | `/lang` | -- | Set your spoken language (unstable branch -- see docs/ARCHITECTURE.md) |
@@ -352,6 +353,20 @@ Animated dots appear when nearby players are typing.
 
 ### Nameplates
 Character name and tagline display above players. Configurable visibility.
+
+### Character Renaming
+`/name <new name>` (e.g. `/name Jane Doe`) is a real rename, not a cosmetic
+overlay -- it sets your own character's actual forename/surname, the same
+fields chosen at character creation. Everything that reads your name (chat
+messages, `/tell` addressing, nameplates, speech bubbles) picks it up
+automatically, since none of them keep their own separate copy. Own
+character only -- there's no way to rename anyone else. A fresh character
+after death starts with whatever name you give it at creation, unaffected
+by any previous character's `/name`.
+
+Other players' clients refresh their view of your new name within a few
+seconds of you setting it. If a nameplate briefly still shows the old name
+right after a rename, it will correct itself shortly -- no action needed.
 
 ### Anonymity System
 - Players beyond 15 tiles appear as "Someone"

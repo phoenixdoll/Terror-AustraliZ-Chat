@@ -2220,6 +2220,27 @@ ServerCommands.BioSyncAll = function(player, args)
 end
 
 -- ============================================================================
+-- NAME (real rename) -- broadcast-only relay
+-- Unlike Bio/Desc above, TAZC owns no store for this: forename/surname are
+-- real vanilla descriptor fields the client already applied to its own
+-- character and pushed via sendPlayerStatsChange() before this command ever
+-- arrives (see TAZC_Bio.saveName). This ping carries no name data on
+-- purpose -- every other client just drops its cached copy of this
+-- username's name and re-reads the (by then engine-synced) descriptor
+-- itself. Nothing to validate or persist here.
+-- ============================================================================
+
+ServerCommands.NameSave = function(player, args)
+    if not player then return end
+
+    local username = TAZC_Core.safe(function() return player:getUsername() end, nil)
+    if not username then return end
+
+    dbg("NameSave: %s renamed, broadcasting refresh", username)
+    broadcastToAll("NameUpdate", { username = username })
+end
+
+-- ============================================================================
 -- DESCRIPTION / CHARACTER-SHEET COMMANDS
 -- Parallel to the Bio commands above; server-authoritative, broadcast on save.
 -- ============================================================================

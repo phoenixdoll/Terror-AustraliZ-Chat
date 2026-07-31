@@ -94,6 +94,7 @@ local PREFIXES = {
     {"/sh ", "safehouse"},
     {"/bio ", "bio"},
     {"/tagline ", "bio"},
+    {"/name ", "name"},
     {"/roll ", "roll"},
     {"/r ", "roll"},
 }
@@ -298,6 +299,7 @@ addUsage({"/roll", "/r"}, "Usage: /roll 2d6  (or /r) -- also d20, 4d10+4. The re
 -- the current color and answers bare /hue with it); this line is the local
 -- fallback should that route ever be unavailable.
 addUsage({"/hue"}, "Usage: /hue #RRGGBB or /hue r,g,b (0-255) -- the color your name speaks in; /hue reset for your natural shade.")
+addUsage({"/name"}, "Usage: /name <new name> -- renames your own character (e.g. /name Jane Doe).")
 
 -- /mc help: the player-facing command list. Player commands only -- the
 -- admin surfaces (/lang grant, etc.) stay out of it. Staff
@@ -312,6 +314,7 @@ local TAZC_HELP = {
     "  /tell <name> <message> -- address someone directly (or /t)",
     "  /roll 2d6 -- roll dice; the result lands in OOC (or /r)",
     "  /bio <text> -- the line shown under your name (or /tagline)",
+    "  /name <new name> -- renames your own character",
     "  /hue #RRGGBB or /hue r,g,b -- the color your name speaks in (/hue reset to undo)",
     "  /ooc <message> -- out-of-character, heard nearby (or /o)",
     "  /all <message> -- out-of-character, the whole server hears",
@@ -409,7 +412,14 @@ function TAZC_Input.send(text)
         TAZC_Bio.saveTagline(message)
         return
     end
-    
+
+    -- Special handling for /name (real character rename, own character only)
+    if channel == "name" then
+        local TAZC_Bio = require("TAZC_Bio")
+        TAZC_Bio.saveName(message)
+        return
+    end
+
     -- Special handling for dice roll command
     -- Rolls dice and sends result to OOC channel
     if channel == "roll" then

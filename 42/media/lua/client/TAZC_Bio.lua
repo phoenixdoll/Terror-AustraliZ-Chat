@@ -98,6 +98,23 @@ local noteCache = {}
 -- Cache of username -> {forename, surname} (to avoid descriptor calls every frame)
 local nameCache = {}
 
+-- Real-rename cap (own character's forename+surname text, split on the
+-- first space -- see saveName). Shorter than the tagline cap: this replaces
+-- an actual character name, not a descriptive line.
+local MAX_NAME_LENGTH = 30
+
+-- Grace window after a NameUpdate broadcast (see onServerCommand below):
+-- the renamed player's own engine-level descriptor sync (sendPlayerStatsChange)
+-- and our NameUpdate ping are two independent network messages with no
+-- ordering guarantee. If an observer's client read the descriptor before
+-- the engine sync landed, it would cache the stale name with nothing left
+-- to ever correct it (nameCache otherwise never expires on its own). For a
+-- few seconds after NameUpdate, force a fresh descriptor read every tick
+-- instead of trusting the cache. Same throttle-window idiom as
+-- LOS_GRACE_MS below.
+local pendingNameRefresh = {}  -- username -> expiresAt (ms)
+local NAME_REFRESH_WINDOW_MS = 3000
+
 -- Track active nameplate panels
 local activeNameplates = {}  -- username -> panel
 
@@ -578,7 +595,20 @@ end
 
 local function showNameplate(player, username)
     if not player or not username then return end
-    
+
+    -- Within a post-NameUpdate grace window, force a fresh descriptor read
+    -- every call instead of trusting a cache entry that might have been
+    -- populated before the engine's own rename sync landed. See
+    -- pendingNameRefresh's declaration for why this exists.
+    local refreshUntil = pendingNameRefresh[username]
+    if refreshUntil then
+        if TAZC_Core.getTimeMs() < refreshUntil then
+            nameCache[username] = nil
+        else
+            pendingNameRefresh[username] = nil
+        end
+    end
+
     local characterName = getCharacterName(player, username)
     local tagline = bioCache[username] or ""
     
@@ -795,6 +825,85 @@ function TAZC_Bio.saveTagline(tagline)
     end)
     
     dbg("saveTagline: '%s'", tagline)
+end
+
+-- ============================================================================
+-- CHARACTER NAME (real rename)
+-- Unlike tagline/description/notes, this isn't TAZC-invented data with its
+-- own store: forename/surname are real vanilla descriptor fields, already
+-- saved by the engine the same as at character creation. /name just lets a
+-- player redo their own character's forename/surname later -- own character
+-- only, the same trust boundary vanilla's own character customization uses
+-- (a client can only ever touch its own live descriptor). Because every
+-- existing reader of the name (server chat, /tell matching, this file's own
+-- nameplate) already re-reads the descriptor fresh or on cache-miss, a real
+-- rename needs no new "is there an override" branch anywhere else -- the
+-- one wrinkle is this file's OWN nameCache, handled by NameUpdate below.
+--
+-- setForename/setSurname + sendPlayerStatsChange is vanilla's own live-rename
+-- path -- ISPlayerStatsUI:onChangeName (media/lua/client/ISUI/PlayerStats/
+-- ISPlayerStatsUI.lua) does exactly this for the character panel's rename
+-- field, confirmed against the installed game's own Lua rather than assumed.
+-- ============================================================================
+
+function TAZC_Bio.saveName(text)
+    if not isClient() then return end
+
+    local player = getPlayer()
+    if not player then return end
+
+    text = sanitizeString(text or "")
+    text = text:sub(1, MAX_NAME_LENGTH)
+
+    if text == "" then
+        safeExec(function()
+            player:addLineChatElement("Usage: /name <new name> -- renames your own character.", 0.7, 0.7, 0.7)
+        end)
+        return
+    end
+
+    local forename, surname = text:match("^(%S+)%s+(.-)$")
+    if not forename then
+        forename, surname = text, ""
+    end
+
+    -- One sendPlayerStatsChange call per setter, matching vanilla's proven
+    -- pattern exactly (ISPlayerStatsUI:onChangeName never changes both
+    -- fields in one go -- its UI only edits one at a time -- so a single
+    -- call after setting both is an untested assumption; this isn't).
+    local applied = safeExec(function()
+        local desc = player:getDescriptor()
+        desc:setForename(forename)
+        sendPlayerStatsChange(player)
+        desc:setSurname(surname)
+        sendPlayerStatsChange(player)
+    end)
+
+    if not applied then
+        dbg("saveName: failed to apply/transmit descriptor change")
+        return
+    end
+
+    -- This client's own copy is authoritative immediately (no network race
+    -- for your own descriptor) -- drop the stale cache entry right away.
+    local username = safeGet(function() return player:getUsername() end, nil)
+    if username then
+        nameCache[username] = nil
+        hideNameplate(username)
+    end
+
+    -- Tell the server so it can ping every other client to refresh -- see
+    -- the module comment above for why this carries no name data itself.
+    safeExec(function()
+        sendClientCommand("TAZC", "NameSave", {})
+    end)
+
+    safeExec(function()
+        local shown = (surname ~= "" ) and (forename .. " " .. surname) or forename
+        player:addLineChatElement("Name changed to: " .. shown, 0.5, 1, 0.5)
+    end)
+
+    dbg("saveName: forename='%s' surname='%s'", forename, surname)
 end
 
 -- ============================================================================
@@ -1044,7 +1153,20 @@ local function onServerCommand(module, command, args)
             hideNameplate(args.username)
             dbg("BioUpdate: %s = '%s'", args.username, tagline)
         end
-        
+
+    elseif command == "NameUpdate" then
+        -- Someone (possibly this client) renamed via /name. No name data
+        -- rides this ping -- see saveName's comment; every observer just
+        -- drops its cache and re-reads that player's descriptor, with a
+        -- short forced-refresh window in case the engine's own sync hasn't
+        -- landed yet (see pendingNameRefresh above).
+        if args.username then
+            nameCache[args.username] = nil
+            pendingNameRefresh[args.username] = TAZC_Core.getTimeMs() + NAME_REFRESH_WINDOW_MS
+            hideNameplate(args.username)
+            dbg("NameUpdate: refreshing cache for %s", args.username)
+        end
+
     elseif command == "BioData" then
         if args.username then
             local tagline = sanitizeString(args.tagline or "")
