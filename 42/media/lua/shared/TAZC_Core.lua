@@ -68,6 +68,7 @@ TAZC_Core.DEBUG_MODULES = {
     CULTURAL  = true,  -- TAZC_Cultural.lua
     TEACHING  = true,  -- TAZC_Teaching.lua
     LANGADMIN = true,  -- TAZC_LangAdmin.lua
+    DISCORDBRIDGE = true,  -- TAZC_DiscordBridge.lua
 }
 
 -- ============================================================================
