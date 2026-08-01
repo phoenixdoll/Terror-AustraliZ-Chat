@@ -3,7 +3,7 @@
 Proximity-based chat for Project Zomboid Build 42 multiplayer, built for the
 Terror AustraliZ community.
 
-**Version:** 0.1.0 (first fork release)
+**Version:** 0.1.1.0 (Bridge)
 **Requires:** Build 42+, Multiplayer
 
 ## About this fork

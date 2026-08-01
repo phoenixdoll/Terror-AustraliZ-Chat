@@ -26,9 +26,9 @@ local TAZC_Core = {}
 --   - CHANGELOG.md (close [Unreleased] and tag with the new version)
 -- ============================================================================
 
-TAZC_Core.VERSION = "0.8.16.8"
-TAZC_Core.VERSION_NAME = "Babel"
-TAZC_Core.BUILD_DATE = "2026-07-07"
+TAZC_Core.VERSION = "0.1.1.0"
+TAZC_Core.VERSION_NAME = "Bridge"
+TAZC_Core.BUILD_DATE = "2026-08-01"
 
 -- ============================================================================
 -- DEBUG CONFIGURATION
@@ -37,7 +37,7 @@ TAZC_Core.BUILD_DATE = "2026-07-07"
 -- Master debug toggle. Off for releases; on for development sessions only.
 -- When this is true, per-module flags in DEBUG_MODULES are consulted; when
 -- false, all dbg() calls short-circuit at the top of TAZC_Core.debugger.
-TAZC_Core.DEBUG = false
+TAZC_Core.DEBUG = true
 
 -- Per-module debug flags (only checked if DEBUG is true).
 --
@@ -50,25 +50,25 @@ TAZC_Core.DEBUG = false
 -- require block (shared by TAZC_AvatarIO, TAZC_Avatar, TAZC_AvatarServer,
 -- TAZC_AvatarWindow, so none of them owns the shared hotspot below).
 TAZC_Core.DEBUG_MODULES = {
-    CONFIG    = true,  -- TAZC_Config.lua
-    RADIO     = true,  -- TAZC_Radio.lua
-    SERVER    = true,  -- TAZC_Server.lua
-    CLIENT    = true,  -- TAZC_Client.lua
-    BUBBLE    = true,  -- TAZC_Bubble.lua
-    PANEL     = true,  -- TAZC_ChatPanel.lua
-    INPUT     = true,  -- TAZC_Input.lua
-    INPUTHIST = true,  -- TAZC_InputHistory.lua
-    TYPING    = true,  -- TAZC_Typing.lua
-    BIO       = true,  -- TAZC_Bio.lua
-    ANON      = true,  -- TAZC_Anonymity.lua
-    LANG      = true,  -- TAZC_Lang.lua (server, language assignment + render)
-    LANG_ACQ  = true,  -- TAZC_Acquisition.lua (per-user vocabulary exposure)
-    PERSIST   = true,  -- TAZC_Persist.lua (A/B crash-safe save layer)
-    SHEET     = true,  -- TAZC_CharacterSheet.lua
-    CULTURAL  = true,  -- TAZC_Cultural.lua
-    TEACHING  = true,  -- TAZC_Teaching.lua
-    LANGADMIN = true,  -- TAZC_LangAdmin.lua
-    DISCORDBRIDGE = true,  -- TAZC_DiscordBridge.lua
+    CONFIG          = true,  -- TAZC_Config.lua
+    RADIO           = true,  -- TAZC_Radio.lua
+    SERVER          = true,  -- TAZC_Server.lua
+    CLIENT          = true,  -- TAZC_Client.lua
+    BUBBLE          = true,  -- TAZC_Bubble.lua
+    PANEL           = true,  -- TAZC_ChatPanel.lua
+    INPUT           = true,  -- TAZC_Input.lua
+    INPUTHIST       = true,  -- TAZC_InputHistory.lua
+    TYPING          = true,  -- TAZC_Typing.lua
+    BIO             = true,  -- TAZC_Bio.lua
+    ANON            = true,  -- TAZC_Anonymity.lua
+    LANG            = true,  -- TAZC_Lang.lua (server, language assignment + render)
+    LANG_ACQ        = true,  -- TAZC_Acquisition.lua (per-user vocabulary exposure)
+    PERSIST         = true,  -- TAZC_Persist.lua (A/B crash-safe save layer)
+    SHEET           = true,  -- TAZC_CharacterSheet.lua
+    CULTURAL        = true,  -- TAZC_Cultural.lua
+    TEACHING        = true,  -- TAZC_Teaching.lua
+    LANGADMIN       = true,  -- TAZC_LangAdmin.lua
+    DISCORDBRIDGE   = true,  -- TAZC_DiscordBridge.lua
 }
 
 -- ============================================================================

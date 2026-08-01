@@ -1,6 +1,6 @@
 name=Terror AustraliZ Chat
 id=TAZC
-modversion=0.1.0
+modversion=0.1.1.0
 description=Proximity chat, speech bubbles, nameplates, anonymity, radio, and the language barrier/babble system for Project Zomboid Build 42 multiplayer. A fork of MongooseChat (originally by Kialae) rebuilt for the Terror AustraliZ community after the original left the Workshop -- used and modified under the original MIT license, with full credit to Kialae's work. Bug reports welcome.
 poster=poster.png
 versionMin=42.0

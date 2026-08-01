@@ -201,7 +201,9 @@ end
 -- OUTBOX_FILE. transmission.message arrives already packet-loss-degraded
 -- -- exactly what an in-game listener on that frequency hears.
 --
--- Line format: "<unix-seconds>|<displayName>|<message>"
+-- Line format: "<unix-seconds>|<displayName>|<discordMessageId-or-empty>|<message>"
+-- discordMessageId is empty for a real in-game transmission; the bot only
+-- uses it to delete a Discord message once it's found (see DIRECTION 2).
 --
 -- DIRECTION 2 -- Discord to game (inbound):
 -- A throttled OnTick poll (not every tick -- see POLL_INTERVAL_MS) reads
@@ -209,9 +211,14 @@ end
 -- message: rejected if it exceeds TAZC_Config.MaxMessageLength, otherwise
 -- run through the SAME TAZC_Radio.addPacketLoss corruption every other
 -- radio transmission gets, and broadcast to every online player with a
--- working, receiving radio tuned to BRIDGE_FREQUENCY.
+-- working, receiving radio tuned to BRIDGE_FREQUENCY. The echo written
+-- back to the outbox (DIRECTION 1's file) carries the original Discord
+-- message's id back through unchanged, purely so the bot can delete that
+-- original message once it posts the in-character corrupted version --
+-- this module never talks to Discord's API and doesn't know what "delete"
+-- means, it just round-trips an opaque id string.
 --
--- Line format (written by the bot): "<displayName>|<message>"
+-- Line format (written by the bot): "<displayName>|<discordMessageId>|<message>"
 --
 -- SCOPE: inbound broadcast reaches hand/belt/inventory radios
 -- (TAZC_Radio.getAllPlayerRadios) and ground/base-station radios within
@@ -276,7 +283,9 @@ local function onDiscordTransmission(transmission)
     if transmission.frequency ~= TAZC_DiscordBridge.BRIDGE_FREQUENCY then return end
 
     local nowSeconds = math.floor(TAZC_Core.getTimeMs() / 1000)
-    local line = string.format("%d|%s|%s",
+    -- Empty discordMessageId field -- a real in-game transmission has no
+    -- Discord message behind it for the bot to delete.
+    local line = string.format("%d|%s||%s",
         nowSeconds,
         cleanField(transmission.characterName or transmission.username),
         cleanField(transmission.message))
@@ -321,13 +330,16 @@ local function drainInbox()
     return lines
 end
 
--- "displayName|message" -- the bot supplies its own displayName (typically
--- the Discord username) so operators can tell speakers apart in dbg output
--- even though every one of them renders in-game as DISCORD_VOICE_NAME.
+-- "displayName|discordMessageId|message" -- the bot supplies its own
+-- displayName (typically the Discord username) so operators can tell
+-- speakers apart in dbg output even though every one of them renders
+-- in-game as DISCORD_VOICE_NAME. discordMessageId is opaque here -- only
+-- round-tripped back to the bot via the outbox echo (see
+-- processInboxLine) so it can delete the original Discord message.
 local function parseInboxLine(line)
-    local displayName, message = line:match("^([^|]*)|(.*)$")
-    if not message then return nil, nil end
-    return displayName, message
+    local displayName, messageId, message = line:match("^([^|]*)|([^|]*)|(.*)$")
+    if not message then return nil, nil, nil end
+    return displayName, messageId, message
 end
 
 -- Send one already-corrupted line to every online player with a working,
@@ -413,7 +425,7 @@ local function broadcastToFrequency(degradedMessage)
 end
 
 local function processInboxLine(line)
-    local displayName, message = parseInboxLine(line)
+    local displayName, discordMessageId, message = parseInboxLine(line)
     if not message or message == "" then
         print("[TAZC-DISCORDBRIDGE] WARNING: malformed inbox line discarded")
         return
@@ -437,10 +449,13 @@ local function processInboxLine(line)
 
     -- Echo the corrupted text back to the outbox so the bot can post the
     -- same "A Voice on the Radio (displayName): <degraded>" confirmation
-    -- into Discord that in-game listeners just heard.
-    appendOutbox(string.format("%d|%s|%s",
+    -- into Discord that in-game listeners just heard, and delete the
+    -- original plain-text Discord message (discordMessageId round-tripped
+    -- unchanged from the inbox line -- see parseInboxLine).
+    appendOutbox(string.format("%d|%s|%s|%s",
         math.floor(TAZC_Core.getTimeMs() / 1000),
         TAZC_DiscordBridge.DISCORD_VOICE_NAME .. " (" .. tostring(displayName) .. ")",
+        cleanField(discordMessageId),
         degraded))
 end
 
