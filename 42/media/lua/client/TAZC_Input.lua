@@ -868,7 +868,39 @@ local function hookISChat()
         end
     end
     dbg("hookISChat: hooked onKeyPress")
-    
+
+    -- ========================================
+    -- GEAR MENU: add a "/hue" shortcut alongside vanilla's font/opacity/etc
+    -- options. The button's onclick was captured as a direct function
+    -- reference at ISChat:initialise() time (self.gearButton.onclick =
+    -- self.onGearButtonClick) -- overriding the class method now wouldn't
+    -- reach it, so this patches the instance's button callback directly,
+    -- same pattern as unfocus/onKeyPress above. getPlayerContextMenu(0)
+    -- (NOT ISContextMenu.get, which clears the menu) fetches the exact
+    -- menu vanilla just populated so the new option lands alongside it.
+    -- ========================================
+    if ISChat.instance.gearButton then
+        local original_gearButton_onclick = ISChat.instance.gearButton.onclick
+        ISChat.instance.gearButton.onclick = function(target)
+            if original_gearButton_onclick then
+                original_gearButton_onclick(target)
+            end
+
+            local context = getPlayerContextMenu(0)
+            if context then
+                context:addOption("Set Speech Color (/hue)...", target, function(chat)
+                    if chat and chat.textEntry then
+                        chat.textEntry:setText("/hue ")
+                        chat:focus()
+                    end
+                end)
+            end
+        end
+        dbg("hookISChat: hooked gearButton.onclick (added /hue shortcut)")
+    else
+        dbg("hookISChat: gearButton not found, skipping /hue shortcut")
+    end
+
     dbg("hookISChat: === HOOKS INSTALLED ===")
 end
 
