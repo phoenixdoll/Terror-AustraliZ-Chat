@@ -14,7 +14,7 @@
     - Frequencies are integers (98600 = 98.6 MHz)
     - Ground radios via IsoGridSquare iteration
     - Vehicle radios via getPartById("Radio")
-    - Headphone detection: 0=speaker, 1=earbuds, 2=headphones
+    - Headphone detection: -1=speaker (public), 0=earbuds, 1=headphones (private)
     
     Author: Kialae (Mongoose Server)
     License: MIT
@@ -350,12 +350,16 @@ local function buildRadioState(deviceData, source, position, ownerId)
     local transmitRange = TAZC_Core.safe(function() return deviceData:getTransmitRange() or 0 end, 0)
     local volume = TAZC_Core.safe(function() return deviceData:getDeviceVolume() or 1.0 end, 1.0)
     
-    -- Headphone detection (B42 API):
-    -- 0 = No headphones (PUBLIC speaker mode)
-    -- 1 = Earbuds (PRIVATE)
-    -- 2 = Headphones (PRIVATE)
-    local headphoneType = TAZC_Core.safe(function() return deviceData:getHeadphoneType() or 0 end, 0)
-    local isPrivate = headphoneType > 0
+    -- Headphone detection (B42 API, confirmed against vanilla
+    -- ISRadioAction:isValidRemoveHeadphones/isValidAddHeadphones, which
+    -- gate on >= 0 and < 0 respectively):
+    -- -1 = No headphones (PUBLIC speaker mode)
+    --  0 = Earbuds (PRIVATE)
+    --  1 = Headphones (PRIVATE)
+    -- BUGFIX: previously defaulted missing reads to 0 and tested
+    -- `headphoneType > 0`, which misclassified earbuds (0) as public.
+    local headphoneType = TAZC_Core.safe(function() return deviceData:getHeadphoneType() or -1 end, -1)
+    local isPrivate = headphoneType >= 0
     
     return {
         frequency = freq,

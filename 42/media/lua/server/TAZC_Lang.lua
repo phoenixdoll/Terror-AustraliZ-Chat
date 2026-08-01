@@ -148,10 +148,16 @@ end
 -- live read here, an already-speaking ASL player kept signing (hands gate,
 -- sight gate, "signs:" framing, gesture-prose render) for the rest of the
 -- session even after an operator flipped the toggle off mid-session.
+-- BUGFIX: gates on the registry's modality metadata (getModality), not
+-- palette.modality directly. A palette table can become unavailable (failed
+-- load, future registration bug) while a character's persisted language is
+-- still "asl" -- gating on the live palette object would silently flip a
+-- signed speaker to "not signed" and drop the radio-silence guarantee this
+-- function exists to enforce. Metadata survives the palette going away;
+-- see TAZC_LangRegistry.metadata.
 function TAZC_Lang.isSignedLanguage(language)
     if type(language) ~= "string" or language == "english" then return false end
-    local palette = TAZC_LangRegistry.getPalette(language)
-    if not palette or palette.modality ~= "signed" then return false end
+    if TAZC_LangRegistry.getModality(language) ~= "signed" then return false end
     if language == "asl" and TAZC_Config.liveSandbox("ASLEnabled", true) == false then
         return false
     end
@@ -168,8 +174,8 @@ end
 -- dormant specifically, not merely non-signed.
 function TAZC_Lang.isDormantSigned(language)
     if type(language) ~= "string" or language == "english" then return false end
-    local palette = TAZC_LangRegistry.getPalette(language)
-    return palette ~= nil and palette.modality == "signed" and not TAZC_Lang.isSignedLanguage(language)
+    return TAZC_LangRegistry.getModality(language) == "signed"
+        and not TAZC_Lang.isSignedLanguage(language)
 end
 
 -- ============================================================================

@@ -333,11 +333,56 @@ end
 
 --[[
     Get current time in milliseconds
-    
+
     Wrapper around PZ's Calendar API for consistent time access.
+
+    BUGFIX: Build 42.19 dedicated servers do not reliably expose the Java
+    Calendar class to Lua, so a bare Calendar.getInstance() call can error
+    on that build. Falls back to getTimestampMs() (B42.19's own vanilla
+    chat-surface clock) and finally os.time()*1000 (older/leaner sandboxes;
+    seconds resolution only) before giving up. Every source is validated
+    (non-nil, non-NaN, finite, >= 0) so a corrupt read can't silently
+    poison timestamps used for decay math, persistence, or cache expiry.
 ]]
 function TAZC_Core.getTimeMs()
-    return Calendar.getInstance():getTimeInMillis()
+    local ok, milliseconds = pcall(function()
+        return Calendar.getInstance():getTimeInMillis()
+    end)
+    if ok and type(milliseconds) == "number"
+        and milliseconds == milliseconds
+        and milliseconds ~= math.huge
+        and milliseconds ~= -math.huge
+        and milliseconds >= 0
+    then
+        return milliseconds
+    end
+
+    if type(getTimestampMs) == "function" then
+        ok, milliseconds = pcall(getTimestampMs)
+        if ok and type(milliseconds) == "number"
+            and milliseconds == milliseconds
+            and milliseconds ~= math.huge
+            and milliseconds ~= -math.huge
+            and milliseconds >= 0
+        then
+            return milliseconds
+        end
+    end
+
+    if os and type(os.time) == "function" then
+        local seconds
+        ok, seconds = pcall(os.time)
+        if ok and type(seconds) == "number"
+            and seconds == seconds
+            and seconds ~= math.huge
+            and seconds ~= -math.huge
+            and seconds >= 0
+        then
+            return math.floor(seconds * 1000)
+        end
+    end
+
+    error("runtime clock unavailable")
 end
 
 --[[

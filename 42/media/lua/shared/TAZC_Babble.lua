@@ -47,8 +47,15 @@ local Str = require("TAZC_StringUtils")
 -- ============================================================================
 
 -- Tiny self-contained LCG. Deterministic per seed, no global-state interference.
+--
+-- BUGFIX: production callers always supply an authoritative message seed;
+-- the `seed or os.time()` fallback only mattered for a caller that omitted
+-- one. os.time() is not a reliable surface on every B42 build/sandbox
+-- (absent in some 42.20 configurations) -- an unprotected call here could
+-- error out the whole babble pass. A caller that omits a seed now gets a
+-- fixed deterministic default (1) instead of touching os.time() at all.
 local function makeRng(seed)
-    local state = math.floor(seed or os.time()) % 2147483647
+    local state = math.floor(seed or 1) % 2147483647
     if state <= 0 then state = 1 end
 
     local rng = {}
@@ -467,18 +474,29 @@ end
 
 -- Swaps the word's first vowel for each single-char palette nucleus in turn
 -- until clear of the blocklist. One vowel change breaks any whole-word or
--- prefix match the shipped lists can produce, so the trailing fallback below
--- is effectively unreachable (test-backed: test_babble_blocklist_mutation_guard
--- forces every candidate through it and confirms escape). If it's ever
--- reached anyway, the word ships to players STILL BLOCKED -- silently,
--- except for guardExhaustedSink, below.
+-- prefix match the shipped lists can produce, so the trailing hard stop
+-- below is effectively unreachable (test-backed:
+-- test_babble_blocklist_mutation_guard forces every candidate through it
+-- and confirms escape).
+--
+-- BUGFIX: if it's ever reached anyway, the word must NOT ship to players
+-- still blocked. Previously returned the original (still-blocked) `word`
+-- unchanged here -- a blocked candidate must never ship merely because the
+-- safety guard ran out of alternatives, so both dead ends now return
+-- opaque punctuation ("...") instead. guardExhaustedSink still fires so an
+-- operator sees it happened.
 local function mutateNucleus(word, palette)
     local chars, vowelAt = {}, nil
     for ch in Str.utf8chars(word) do
         chars[#chars + 1] = ch
         if not vowelAt and MUTATE_VOWELS[ch] then vowelAt = #chars end
     end
-    if not vowelAt then return word end   -- no vowel to mutate
+    if not vowelAt then
+        if guardExhaustedSink then
+            pcall(guardExhaustedSink, word, palette.name, "no-mutable-vowel")
+        end
+        return "..."
+    end
     local original = chars[vowelAt]
     for _, v in ipairs(palette.nuclei or {}) do
         if v ~= original and MUTATE_VOWELS[v] then   -- single-char nuclei only
@@ -490,9 +508,9 @@ local function mutateNucleus(word, palette)
         end
     end
     if guardExhaustedSink then
-        pcall(guardExhaustedSink, word, palette.name)
+        pcall(guardExhaustedSink, word, palette.name, "candidates-exhausted")
     end
-    return word
+    return "..."
 end
 
 -- One unguarded babble attempt; probabilities/boost/lettersPerSyllable come

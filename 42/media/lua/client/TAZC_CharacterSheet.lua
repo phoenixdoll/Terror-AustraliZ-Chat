@@ -265,21 +265,29 @@ function Sheet:renderContent()
 
     -- Anonymity resolution (others only). Runs every frame, so if they mask up
     -- or walk out of sight while the window is open, the card updates live.
-    local displayName, isAnon, isDistant = self.realName, false, false
-    if not self.editable then
+    --
+    -- BUGFIX: defaults now start ANONYMOUS/DISTANT before the check runs
+    -- (was: self.realName/false/false). The old defaults meant a `getDisplayName`
+    -- call that succeeded (ok == true) but returned a nil/false-ish name or
+    -- flag -- not an error, just an ambiguous result -- fell through
+    -- `nm or self.realName` and `anon or false`, silently leaking the real
+    -- name instead of failing closed. Only an explicit, verified result now
+    -- overrides the safe default.
+    local displayName, isAnon, isDistant
+    if self.editable then
+        displayName, isAnon, isDistant = self.realName, false, false
+    else
+        displayName = (TAZC_Anonymity.Config and TAZC_Anonymity.Config.distantName) or "Someone"
+        isAnon, isDistant = true, true
         local ok, nm, anon, dist = pcall(function()
             return TAZC_Anonymity.getDisplayName(self.targetPlayer, self.targetUsername, self.realName)
         end)
         if ok then
-            displayName = nm or self.realName
-            isAnon = anon or false
-            isDistant = dist or false
-        else
-            -- Fail closed: never leak on an errored check.
-            displayName = (TAZC_Anonymity.Config and TAZC_Anonymity.Config.distantName) or "Someone"
-            isAnon = true
-            isDistant = true
+            displayName = nm or displayName
+            isAnon = anon ~= false
+            isDistant = dist ~= false
         end
+        -- else: fail closed on the pre-set anonymous/distant defaults above.
     end
 
     -- Portrait slot on the left: darkened panel + border. The model is an
@@ -381,7 +389,13 @@ function TAZC_CharacterSheet.open(targetPlayer)
     local win = Sheet:new(math.floor((sw - WIN_W) / 2), math.floor((sh - WIN_H) / 2), WIN_W, WIN_H)
     win.targetPlayer = targetPlayer
     win.targetUsername = username
-    win.realName = TAZC_Bio._getCharacterName(targetPlayer, username) or username
+    -- BUGFIX: was `or username` -- on a failed character-name lookup this
+    -- fell back to the raw ACCOUNT username, not the character's in-fiction
+    -- name. Account identity is transport-layer, never a public display
+    -- name; a neutral "Someone" fallback matches the fail-closed default
+    -- the anonymity resolution above already uses.
+    win.realName = TAZC_Bio._getCharacterName(targetPlayer, username)
+        or (TAZC_Anonymity.Config and TAZC_Anonymity.Config.distantName) or "Someone"
     win.editable = (username == localUsername)
 
     local ok = safeExec(function()

@@ -693,15 +693,16 @@ local function onRadioMessage(msgData)
             frequency = msgData.frequency,
             playerColor = TAZC_Config.ChannelColors.radio or {120, 220, 200}
         }
-        -- Radio ignores distance but honours the mask (0.8.16.3): a voice on
-        -- the radio is recognisable however far the speaker is, so the real
-        -- name the server sent in panelData.characterName is shown -- unless
-        -- the speaker is deliberately masked, in which case they stay
-        -- "A Masked Figure" (see TAZC_Anonymity.anonymizeRadioMessageData).
+        -- Radio ignores distance AND mask: a voice on the radio is
+        -- recognisable however far the speaker is, and a mask hides your
+        -- face, not your voice. The real name the server sent in
+        -- panelData.characterName is always shown (see
+        -- TAZC_Anonymity.anonymizeRadioMessageData -- reserved for a future
+        -- craftable voice-modulator item, not clothing).
         local speaker = getPlayerByUsername(msgData.senderUsername)
         TAZC_Anonymity.anonymizeRadioMessageData(panelData, speaker)
         if panelData.isAnonymous then
-            dbg("onRadioMessage: masked speaker rendered as '%s'", panelData.characterName)
+            dbg("onRadioMessage: anonymized speaker rendered as '%s'", panelData.characterName)
         end
         TAZC_ChatPanel.addMessage(panelData)
     end

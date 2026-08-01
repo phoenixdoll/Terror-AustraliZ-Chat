@@ -12,6 +12,9 @@
     - Beyond recognition range -> "Someone"
     - Mask state unverifiable (data not synced, or an errored check) ->
       "A Masked Figure" (fails closed, never leaks the real name)
+    - Radio: mask is ignored -- a mask hides your face, not your voice.
+      Real name is always shown on radio. Reserved for a future craftable
+      voice modulator item (see anonymizeRadioMessageData's FUTURE HOOK).
 
     Author: Kialae (Mongoose Server)
     License: MIT
@@ -221,21 +224,21 @@ end
     wornItem:getLocation() == ItemBodyLocation.SWEATER_HAT) -- no
     stringification anywhere in the hot path.
 
-    Emily's ruling: anonymity is presentation, not security. Every
-    unreliable read below (nil container, unsynced size=0, an errored Java
-    call) now fails OPEN -- reports NOT masked (the honest name shows) --
-    instead of the previous fail-closed default. A read stays uncached
-    (reliable=false) whenever it's not backed by genuine data, so a
-    following call keeps re-checking and self-heals to the true state
-    (masked or not) the moment real data lands, same self-healing shape as
-    before, just the opposite starting guess.
+    Design decision: anonymity exists so a player can choose to hide their
+    identity, so an unverifiable read must never be the reason a masked
+    player's real name leaks. Every unreliable read below (nil container,
+    unsynced size=0, an errored Java call) fails CLOSED -- reports MASKED --
+    rather than guessing "not masked" and showing the honest name. A read
+    stays uncached (reliable=false) whenever it's not backed by genuine
+    data, so a following call keeps re-checking and self-heals to the true
+    state (masked or not) the moment real data lands.
 
     @param player IsoPlayer to check
-    @return boolean true if identity is hidden (only ever true on a verified read)
-    @return boolean true if the read was reliable (false = fail-open guess, don't cache)
+    @return boolean true if identity is hidden, or the read could not be verified
+    @return boolean true if the read was reliable (false = fail-closed guess, don't cache)
 ]]
 function TAZC_Anonymity.checkMaskDirect(player)
-    if not player then return false, true end  -- No player = reliably not masked
+    if not player then return true, false end  -- No player: can't verify, fail closed
 
     -- Wrap all Java calls in pcall for safety
     local ok, result, reliable = pcall(function()
@@ -243,7 +246,7 @@ function TAZC_Anonymity.checkMaskDirect(player)
         local wornItems = player:getWornItems()
         dbg("checkMaskDirect: wornItems=%s (type=%s) for %s",
             tostring(wornItems), type(wornItems), tostring(player:getUsername() or "?"))
-        if not wornItems then return false, false end  -- Can't get data: fail open
+        if not wornItems then return true, false end  -- Can't get data: fail closed
 
         -- Resolve the configured slot NAMES (see Config.identityHidingSlots)
         -- against the real ItemBodyLocation global's own fields -- a name
@@ -264,13 +267,13 @@ function TAZC_Anonymity.checkMaskDirect(player)
             tostring(player:getUsername() or "?"))
 
         -- B42: remote players may report size=0 before clothing has synced --
-        -- unverifiable, so fail open (not masked) instead of hiding an
-        -- honest, unmasked name behind a guess; re-checked every call
+        -- unverifiable, so fail closed (masked) instead of risking an honest
+        -- name shown over a masked player mid-sync; re-checked every call
         -- (reliable=false) until real data lands.
         if size == 0 then
-            dbg("checkMaskDirect: wornItems empty for %s -> unreliable, showing honest name until synced",
+            dbg("checkMaskDirect: wornItems empty for %s -> unreliable, masking until synced",
                 tostring(player:getUsername() or "?"))
-            return false, false
+            return true, false
         end
 
         for i = 0, size - 1 do
@@ -319,8 +322,8 @@ function TAZC_Anonymity.checkMaskDirect(player)
     end)
 
     if not ok then
-        dbg("checkMaskDirect: error checking player -- failing OPEN (honest name, uncached): %s", tostring(result))
-        return false, false  -- Errored check: fail open (presentation, not security)
+        dbg("checkMaskDirect: error checking player -- failing CLOSED (masked, uncached): %s", tostring(result))
+        return true, false  -- Errored check: fail closed (masked, never leak a real name on a guess)
     end
 
     return result, reliable
@@ -513,8 +516,14 @@ end
     the raw string "Deaf" is a fallback only for the (should-never-happen)
     case where the CharacterTrait global itself isn't available.
 
-    Fails to `false` (NOT Deaf) on ANY error: a broken read must never
-    silently mute a hearing player's ordinary chat.
+    Fails to `false` (NOT Deaf) on ANY error: deliberately fail-open here,
+    unlike the mask/radio checks elsewhere in this module. The asymmetry is
+    intentional -- an anonymity leak reveals a real player's identity, which
+    is the more severe failure; a broken Deaf-trait read at worst means a
+    hearing character occasionally reads a message a Deaf character
+    shouldn't have (in-fiction: "lip-read unusually well that one time"),
+    which is a minor, self-healing RP fudge, not a privacy problem. A broken
+    read must never silently mute a hearing player's ordinary chat.
     @return boolean
 ]]
 function TAZC_Anonymity.localPlayerIsDeaf()
@@ -525,7 +534,7 @@ function TAZC_Anonymity.localPlayerIsDeaf()
         return p:hasTrait(traitType) == true
     end)
     if not ok then
-        dbg("localPlayerIsDeaf: trait check errored, treating as NOT deaf: %s", tostring(isDeaf))
+        dbg("localPlayerIsDeaf: trait check errored, treating as NOT deaf (fail open): %s", tostring(isDeaf))
         return false
     end
     return isDeaf == true
@@ -545,13 +554,12 @@ end
     Never "improvable to full" -- lipreading stays lossy at any distance
     inside range; this ladder has no state that climbs toward comprehension.
 
-    OUTER SAFETY NET (0.8.16.6, cobra incident): the whole ladder runs
-    inside its own pcall. Each step below (localPlayerIsDeaf, canSee,
-    the distance read) already fails closed/open internally, but this
-    outer guard is belt-and-suspenders -- if ANY of them ever lets an
-    error escape their own pcall for a reason not yet seen, that error
-    must still resolve to "full" here, never leave a hearing player's
-    spoken message muffled or dropped because a Deaf-check hiccuped.
+    OUTER SAFETY NET: the whole ladder runs inside its own pcall, and fails
+    OPEN to "full" -- same deliberate asymmetry as localPlayerIsDeaf above
+    (see its doc comment): if ANY step here ever lets an error escape for a
+    reason not yet seen, that error must still resolve to "full", never
+    leave a hearing player's spoken message muffled or dropped because a
+    Deaf-check hiccuped.
 ]]
 function TAZC_Anonymity.deafReception(speakerPlayer)
     local ok, result = pcall(function()
@@ -629,7 +637,7 @@ end
 
     @param msgData table with username, characterName fields
     @param speakerPlayer IsoPlayer who is speaking (nil if not loaded here)
-    @return boolean true if the name was anonymised (masked speaker only)
+    @return boolean true if the name was anonymised
 ]]
 function TAZC_Anonymity.anonymizeRadioMessageData(msgData, speakerPlayer)
     if not msgData or not msgData.username then return false end

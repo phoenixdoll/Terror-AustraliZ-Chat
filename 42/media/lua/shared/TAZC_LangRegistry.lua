@@ -46,6 +46,7 @@
 -- =============================================================================
 --   M.register(name, palette)         -- palette files self-register
 --   M.getPalette(name)        -> palette|nil
+--   M.getModality(name)       -> "signed"|"spoken"|nil
 --   M.isKnownLanguage(name)   -> bool
 --   M.listLanguages()         -> sorted list of language names
 
@@ -54,6 +55,18 @@ local M = {
     palettes = {},
     -- Set of known language names. English is implicit (baseline).
     languages = { english = true },
+    -- BUGFIX: modality (spoken/signed) tracked independent of whether the
+    -- palette payload is currently loaded. A persisted character record can
+    -- carry "asl" as its speaking/native language indefinitely; if the ASL
+    -- palette ever fails to load or register on some future build, callers
+    -- that gate on `getPalette(name).modality` would silently see nil and
+    -- treat a signed speaker as an ordinary spoken one -- breaking the
+    -- "signed languages never transmit over radio" guarantee. This table
+    -- keeps modality identity alive even when the palette itself isn't.
+    metadata = {
+        english = { modality = "spoken", displayName = "English" },
+        asl = { modality = "signed", displayName = "ASL", intrinsic = true },
+    },
 }
 
 -- =============================================================================
@@ -240,6 +253,18 @@ function M.register(name, palette)
     if type(name) ~= "string" or type(palette) ~= "table" then
         return false, "register requires string name and table palette"
     end
+    local key = name:lower()
+    local paletteModality = palette.modality == "signed" and "signed" or "spoken"
+    local declared = M.metadata[key]
+    if declared and declared.modality and declared.modality ~= paletteModality then
+        local err = string.format(
+            "palette modality '%s' conflicts with intrinsic '%s' metadata",
+            paletteModality, declared.modality)
+        print(string.format(
+            "[TAZC] WARNING: palette '%s' failed validation: %s. " ..
+            "Palette will not be registered.", tostring(name), err))
+        return false, err
+    end
     local ok, err = M.validate(palette)
     if not ok then
         -- Log loudly and refuse the registration; bad palette won't crash the
@@ -250,7 +275,17 @@ function M.register(name, palette)
             "Palette will not be registered.", tostring(name), tostring(err)))
         return false, err
     end
-    local key = name:lower()
+
+    -- Retain modality/display metadata even if the palette table later
+    -- becomes unavailable. ASL's entry is intrinsic above; dynamically
+    -- registered languages gain the same stable identity after their first
+    -- valid load.
+    local metadata = declared or {}
+    metadata.modality = paletteModality
+    if type(palette.displayName) == "string" and palette.displayName ~= "" then
+        metadata.displayName = palette.displayName
+    end
+    M.metadata[key] = metadata
     M.palettes[key] = palette
     M.languages[key] = true
     return true, nil
@@ -259,6 +294,16 @@ end
 function M.getPalette(name)
     if type(name) ~= "string" then return nil end
     return M.palettes[name:lower()]
+end
+
+-- Physical modality is language identity, not palette payload -- see the
+-- BUGFIX note on M.metadata above. Stays available when a palette fails
+-- validation, is absent from the build, or becomes unavailable after
+-- persisted character state has already selected it.
+function M.getModality(name)
+    if type(name) ~= "string" then return nil end
+    local metadata = M.metadata[name:lower()]
+    return metadata and metadata.modality or nil
 end
 
 function M.isKnownLanguage(name)
@@ -309,9 +354,14 @@ end
 function M.displayName(name)
     if type(name) ~= "string" or name == "" then return name end
     local palette = M.getPalette(name)
+    local metadata = M.metadata[name:lower()]
     local base
     if palette and type(palette.displayName) == "string" and palette.displayName ~= "" then
         base = palette.displayName
+    elseif metadata and type(metadata.displayName) == "string"
+        and metadata.displayName ~= ""
+    then
+        base = metadata.displayName
     else
         base = name:sub(1, 1):upper() .. name:sub(2)
     end
