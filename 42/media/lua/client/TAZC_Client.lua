@@ -686,6 +686,7 @@ local function onRadioMessage(msgData)
         local panelData = {
             username = msgData.senderUsername,
             characterName = msgData.senderCharacter,
+            senderIsFemale = msgData.senderIsFemale,
             message = msgData.message,
             chunks = msgData.chunks,  -- v8.5.1: chunked radio render
             channel = "radio",
@@ -696,9 +697,14 @@ local function onRadioMessage(msgData)
         -- Radio ignores distance AND mask: a voice on the radio is
         -- recognisable however far the speaker is, and a mask hides your
         -- face, not your voice. The real name the server sent in
-        -- panelData.characterName is always shown (see
-        -- TAZC_Anonymity.anonymizeRadioMessageData -- reserved for a future
-        -- craftable voice-modulator item, not clothing).
+        -- panelData.characterName is shown whenever the speaker can be
+        -- resolved. When they can't (cross-cell -- no local player object
+        -- to identify at all), anonymizeRadioMessageData renders a
+        -- masculine/feminine voice descriptor from the server-computed
+        -- senderIsFemale flag instead of the generic fallback. (See
+        -- TAZC_Anonymity.anonymizeRadioMessageData -- the mask branch is
+        -- still gone; reserved for a future craftable voice-modulator item,
+        -- not clothing.)
         local speaker = getPlayerByUsername(msgData.senderUsername)
         TAZC_Anonymity.anonymizeRadioMessageData(panelData, speaker)
         if panelData.isAnonymous then

@@ -12,9 +12,13 @@
     - Beyond recognition range -> "Someone"
     - Mask state unverifiable (data not synced, or an errored check) ->
       "A Masked Figure" (fails closed, never leaks the real name)
-    - Radio: mask is ignored -- a mask hides your face, not your voice.
-      Real name is always shown on radio. Reserved for a future craftable
-      voice modulator item (see anonymizeRadioMessageData's FUTURE HOOK).
+    - Radio, masked speaker -> "A Masked Figure" (mask honoured, same as
+      proximity chat; distance is ignored on radio)
+    - Radio, unmasked + resolvable -> Real name
+    - Radio, speaker unresolvable (cross-cell, no local player object at
+      all -- can't check mask) -> "A Masculine Voice"/"A Feminine Voice"
+      from the server-computed gender flag, or "A Voice on the Radio" if
+      even that didn't arrive
 
     Author: Kialae (Mongoose Server)
     License: MIT
@@ -44,8 +48,14 @@ TAZC_Anonymity.Config = {
     maskedName = "A Masked Figure",
 
     -- Radio speaker whose player object isn't available client-side
-    -- (different cell, disconnected mid-broadcast). We can't check mask or
-    -- distance, so the line gets a neutral voice instead of the real name.
+    -- (different cell, disconnected mid-broadcast). We can't resolve them
+    -- to a local player object at all, but the server still tells us their
+    -- gender (msgData.senderIsFemale, computed authoritatively server-side
+    -- -- see TAZC_Server.routeRadio), so the line identifies a voice
+    -- instead of a name. radioName is the last-resort fallback for the
+    -- rare case even that flag didn't arrive.
+    voiceMasculine = "A Masculine Voice",
+    voiceFeminine = "A Feminine Voice",
     radioName = "A Voice on the Radio",
 
     -- Chat-panel name color for anonymous speakers. Overrides the speaker's
@@ -621,23 +631,27 @@ end
 
     DESIGN DECISION (0.8.16.3): radio ignores DISTANCE but still honours the
     MASK. A voice on the radio is recognisable however far the speaker is, so
-    the "Someone" (past recognition range) and "A Voice on the Radio"
-    (cross-cell) anonymisations do NOT apply -- the real name the server sent
-    is shown. But a MASK is a deliberate act of anonymity: someone
-    roleplaying a hidden identity shouldn't be outed just because their hot
-    mic reaches a listener past a wall or sightline. So a masked speaker
-    still renders as "A Masked Figure" on the radio line, exactly as they do
-    in proximity chat.
+    the "Someone" (past recognition range) anonymisation does NOT apply --
+    the real name the server sent is shown at any distance. But a MASK is a
+    deliberate act of anonymity: someone roleplaying a hidden identity
+    shouldn't be outed just because their hot mic reaches a listener past a
+    wall or sightline. So a masked speaker still renders as "A Masked
+    Figure" on the radio line, exactly as they do in proximity chat.
 
-    The mask can only be checked when the speaker's player object is loaded on
-    this client -- which is precisely the nearby / in-sightline case the mask
-    is meant to protect. A genuinely cross-cell speaker (no player object)
-    can't be seen at all, so there's no meta-reveal to guard against and the
-    real name is shown.
+    The mask can only be checked when the speaker's player object is loaded
+    on this client. A genuinely cross-cell speaker (no player object at all)
+    can't have their mask checked OR their name safely shown -- unlike the
+    old cross-cell handling, this no longer falls through to the real name.
+    Instead it renders a voice descriptor: msgData.senderIsFemale is
+    computed authoritatively SERVER-side (TAZC_Server.routeRadio has the
+    real player object regardless of what's loaded on any given client) and
+    carried on the wire specifically so this case can still say SOMETHING
+    about the speaker without a local player object to check. Falls back to
+    the generic radioName if even that flag didn't arrive.
 
-    @param msgData table with username, characterName fields
+    @param msgData table with username, characterName, senderIsFemale fields
     @param speakerPlayer IsoPlayer who is speaking (nil if not loaded here)
-    @return boolean true if the name was anonymised (masked speaker only)
+    @return boolean true if the name was anonymised
 ]]
 function TAZC_Anonymity.anonymizeRadioMessageData(msgData, speakerPlayer)
     if not msgData or not msgData.username then return false end
@@ -660,8 +674,29 @@ function TAZC_Anonymity.anonymizeRadioMessageData(msgData, speakerPlayer)
         return true
     end
 
-    -- Unmasked, or cross-cell (can't check the mask, but out of sightline
-    -- anyway): show the real name the server put in msgData.characterName.
+    -- Cross-cell: no local player object, so the mask can't be checked at
+    -- all. Render a voice descriptor from the server-computed gender flag
+    -- instead of guessing "unmasked" and showing the real name.
+    if not speakerPlayer then
+        local voiceName
+        if msgData.senderIsFemale == true then
+            voiceName = TAZC_Anonymity.Config.voiceFeminine
+        elseif msgData.senderIsFemale == false then
+            voiceName = TAZC_Anonymity.Config.voiceMasculine
+        else
+            voiceName = TAZC_Anonymity.Config.radioName
+        end
+        dbg("anonymizeRadioMessageData: %s unresolved cross-cell -> '%s'",
+            tostring(msgData.username), voiceName)
+        msgData.characterName = voiceName
+        msgData.isAnonymous = true
+        msgData.isDistant = true  -- nothing verified about them; hide avatar too
+        msgData.playerColor = TAZC_Anonymity.Config.anonymousColor
+        return true
+    end
+
+    -- Resolvable and unmasked: show the real name the server put in
+    -- msgData.characterName.
     return false
 end
 

@@ -1667,6 +1667,17 @@ local function routeRadio(ctx)
     local doBabble = ctx.doBabble
     local speakerUsername = msgData.username
 
+    -- Computed authoritatively here (server always has the real speaking
+    -- player object) and carried on the wire as senderIsFemale so a
+    -- receiving client can render "a masculine/feminine voice" for a
+    -- cross-cell speaker it can't resolve to a local player object at all
+    -- -- see TAZC_Anonymity.anonymizeRadioMessageData. nil (not a boolean)
+    -- if the read itself failed, so the client can fall back safely.
+    local senderIsFemaleOk, senderIsFemale = pcall(function() return player:isFemale() end)
+    if not senderIsFemaleOk or type(senderIsFemale) ~= "boolean" then
+        senderIsFemale = nil
+    end
+
     -- Emotes never transmit as themselves -- an action isn't sound. But a
     -- speaker can carry a quoted line of actual dialogue over the radio from
     -- inside an emote (`/me scratches nose. "This is a message I want on the
@@ -1815,6 +1826,7 @@ local function routeRadio(ctx)
         local radioMsgData = {
             senderUsername = msgData.username,
             senderCharacter = msgData.characterName,
+            senderIsFemale = senderIsFemale,
             message = selfDegraded,
             language = speakerOwnLangTag,
             channel = channel,
@@ -1922,6 +1934,7 @@ local function routeRadio(ctx)
                     local radioMsgData = {
                         senderUsername = msgData.username,
                         senderCharacter = msgData.characterName,
+                        senderIsFemale = senderIsFemale,
                         message = degraded,
                         chunks = degradedChunks,
                         language = radioLangTag,
