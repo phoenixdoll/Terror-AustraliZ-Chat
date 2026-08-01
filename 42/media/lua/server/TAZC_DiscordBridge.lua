@@ -34,10 +34,12 @@
 
     Line format (written by the bot): "<displayName>|<message>"
 
-    SCOPE (first pass): inbound broadcast only reaches hand/belt/inventory
-    radios (TAZC_Radio.getAllPlayerRadios) -- vehicle and ground/
-    base-station radios are not reached yet, since there's no in-world
-    source position for a Discord-origin message to search outward from.
+    SCOPE: inbound broadcast reaches hand/belt/inventory radios
+    (TAZC_Radio.getAllPlayerRadios) and ground/base-station radios within
+    GROUND_RADIO_RANGE of the bridge's assigned origin point (SOURCE_X/Y/Z
+    -- a Discord message has no real in-world position, so it's treated as
+    a physical installation sitting at that fixed point). Vehicle radios
+    are not reached yet.
 
     Author: 5tac3 (Terror AustraliZ)
     License: MIT
@@ -50,6 +52,12 @@ local TAZC_Radio = require("TAZC_Radio")
 local TAZC_Bridge = require("TAZC_Bridge")
 
 local dbg = TAZC_Core.debugger("DISCORDBRIDGE")
+
+-- Unconditional (not gated by TAZC_Core.DEBUG, off by default) load-time
+-- marker for the silent-no-write investigation: proves this file's
+-- top-level code executed at all, independent of any radio event ever
+-- happening. Remove once resolved.
+print("[TAZC-DISCORDBRIDGE] module loading (top-level code executing)")
 
 local TAZC_DiscordBridge = {}
 
@@ -76,6 +84,15 @@ TAZC_DiscordBridge.POLL_INTERVAL_MS = 3000
 -- fallback exists for. This copy is server-authoritative and independent
 -- of that client-side module.
 TAZC_DiscordBridge.DISCORD_VOICE_NAME = "A Voice on the Radio"
+
+-- A Discord-origin message has no real in-world position. Treated as if
+-- the bridge were a physical radio installation sitting at world origin --
+-- lets a ground-placed radio near (0,0,0) pick it up too, same as any
+-- other ground radio, rather than only ever reaching carried radios.
+TAZC_DiscordBridge.SOURCE_X = 0
+TAZC_DiscordBridge.SOURCE_Y = 0
+TAZC_DiscordBridge.SOURCE_Z = 0
+TAZC_DiscordBridge.GROUND_RADIO_RANGE = 120
 
 local lastPollMs = 0
 
@@ -108,8 +125,21 @@ end
 -- ============================================================================
 
 local function onTransmission(transmission)
+    -- Unconditional (not gated by TAZC_Core.DEBUG, which defaults off) --
+    -- diagnostic for the silent-no-write investigation. Remove once resolved.
+    print(string.format(
+        "[TAZC-DISCORDBRIDGE] onTransmission: type=%s frequency=%s (type=%s) configured=%s (type=%s) match=%s",
+        type(transmission),
+        tostring(transmission and transmission.frequency),
+        type(transmission and transmission.frequency),
+        tostring(TAZC_DiscordBridge.BRIDGE_FREQUENCY),
+        type(TAZC_DiscordBridge.BRIDGE_FREQUENCY),
+        tostring(transmission and transmission.frequency == TAZC_DiscordBridge.BRIDGE_FREQUENCY)))
+
     if type(transmission) ~= "table" then return end
     if transmission.frequency ~= TAZC_DiscordBridge.BRIDGE_FREQUENCY then return end
+
+    print("[TAZC-DISCORDBRIDGE] onTransmission: frequency matched, writing to outbox")
 
     local nowSeconds = math.floor(TAZC_Core.getTimeMs() / 1000)
     local line = string.format("%d|%s|%s",
@@ -118,7 +148,7 @@ local function onTransmission(transmission)
         cleanField(transmission.message))
 
     appendOutbox(line)
-    dbg("onTransmission: relayed to outbox (%d bytes)", #line)
+    print(string.format("[TAZC-DISCORDBRIDGE] onTransmission: appendOutbox call completed for line (%d bytes)", #line))
 end
 
 TAZC_Bridge.Transmissions.addListener("DiscordBridge", onTransmission)
@@ -167,41 +197,84 @@ local function parseInboxLine(line)
 end
 
 -- Send one already-corrupted line to every online player with a working,
--- receiving radio on BRIDGE_FREQUENCY. First pass: hand/belt/inventory
--- radios only -- see SCOPE note at the top of this file.
+-- receiving radio on BRIDGE_FREQUENCY -- both carried (hand/belt/inventory)
+-- radios, and now also ground/base-station radios within
+-- GROUND_RADIO_RANGE of the bridge's assigned origin point (see the
+-- SOURCE_X/Y/Z comment above). A player only ever gets one delivery even
+-- if reachable both ways.
 local function broadcastToFrequency(degradedMessage)
     local sentCount = 0
+    local delivered = {}
     local playersOk, onlinePlayers = pcall(function() return getOnlinePlayers() end)
     if not playersOk or not onlinePlayers then
         print("[TAZC-DISCORDBRIDGE] WARNING: getOnlinePlayers unavailable, broadcast dropped")
         return 0
     end
 
+    local function deliverTo(targetPlayer, radio)
+        if delivered[targetPlayer] then return end
+        delivered[targetPlayer] = true
+        sendServerCommand(targetPlayer, "TAZC", "RadioMessage", {
+            senderUsername = "discord",
+            senderCharacter = TAZC_DiscordBridge.DISCORD_VOICE_NAME,
+            message = degradedMessage,
+            chunks = nil,
+            language = nil,
+            channel = "say",
+            frequency = TAZC_DiscordBridge.BRIDGE_FREQUENCY,
+            receiverType = radio.source,
+            receiverOwnerId = radio.ownerId,
+            receiverPosition = radio.position,
+            isPrivate = radio.isPrivate,
+            volume = radio.volume
+        })
+        sentCount = sentCount + 1
+    end
+
+    -- Carried radios (hand/belt/inventory).
     for i = 0, onlinePlayers:size() - 1 do
         local targetPlayer = onlinePlayers:get(i)
         local radios = TAZC_Radio.getAllPlayerRadios(targetPlayer)
         for _, radio in ipairs(radios) do
             if radio.frequency == TAZC_DiscordBridge.BRIDGE_FREQUENCY
                and TAZC_Radio.canReceive(radio) then
-                sendServerCommand(targetPlayer, "TAZC", "RadioMessage", {
-                    senderUsername = "discord",
-                    senderCharacter = TAZC_DiscordBridge.DISCORD_VOICE_NAME,
-                    message = degradedMessage,
-                    chunks = nil,
-                    language = nil,
-                    channel = "say",
-                    frequency = TAZC_DiscordBridge.BRIDGE_FREQUENCY,
-                    receiverType = radio.source,
-                    receiverOwnerId = radio.ownerId,
-                    receiverPosition = radio.position,
-                    isPrivate = radio.isPrivate,
-                    volume = radio.volume
-                })
-                sentCount = sentCount + 1
-                break  -- one delivery per player even if they carry >1 radio on this freq
+                deliverTo(targetPlayer, radio)
+                break  -- one carried radio's worth is enough for this player
             end
         end
     end
+
+    -- Ground/base-station radios near the bridge's assigned origin point.
+    -- Reachable players are computed the same way TAZC_Server.routeRadio
+    -- scales ground-radio hearing range: whisper-range floor, yell-range
+    -- (capped) scaled by the radio's own volume.
+    local groundRadios = TAZC_Radio.getGroundRadios(
+        TAZC_DiscordBridge.SOURCE_X, TAZC_DiscordBridge.SOURCE_Y,
+        TAZC_DiscordBridge.SOURCE_Z, TAZC_DiscordBridge.GROUND_RADIO_RANGE)
+    for _, radio in ipairs(groundRadios) do
+        if radio.frequency == TAZC_DiscordBridge.BRIDGE_FREQUENCY
+           and TAZC_Radio.canReceive(radio) and radio.position then
+            local vol = radio.volume or 1.0
+            local hearingRange = math.max(TAZC_Config.Ranges.whisper,
+                math.min(TAZC_Config.Ranges.yell, 30) * vol)
+            for i = 0, onlinePlayers:size() - 1 do
+                local targetPlayer = onlinePlayers:get(i)
+                if not delivered[targetPlayer] then
+                    local okPos, px, py = pcall(function()
+                        return targetPlayer:getX(), targetPlayer:getY()
+                    end)
+                    if okPos then
+                        local dist = TAZC_Core.distance2D(
+                            px, py, radio.position.x, radio.position.y)
+                        if dist <= hearingRange then
+                            deliverTo(targetPlayer, radio)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     return sentCount
 end
 
