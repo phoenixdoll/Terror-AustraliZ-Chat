@@ -637,7 +637,7 @@ end
 
     @param msgData table with username, characterName fields
     @param speakerPlayer IsoPlayer who is speaking (nil if not loaded here)
-    @return boolean true if the name was anonymised
+    @return boolean true if the name was anonymised (masked speaker only)
 ]]
 function TAZC_Anonymity.anonymizeRadioMessageData(msgData, speakerPlayer)
     if not msgData or not msgData.username then return false end
