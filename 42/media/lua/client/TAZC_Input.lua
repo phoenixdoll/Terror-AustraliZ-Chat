@@ -871,24 +871,33 @@ local function hookISChat()
 
     -- ========================================
     -- GEAR MENU: add a "/hue" shortcut alongside vanilla's font/opacity/etc
-    -- options. The button's onclick was captured as a direct function
-    -- reference at ISChat:initialise() time (self.gearButton.onclick =
-    -- self.onGearButtonClick) -- overriding the class method now wouldn't
-    -- reach it, so this patches the instance's button callback directly,
-    -- same pattern as unfocus/onKeyPress above. getPlayerContextMenu(0)
-    -- (NOT ISContextMenu.get, which clears the menu) fetches the exact
-    -- menu vanilla just populated so the new option lands alongside it.
+    -- options.
+    --
+    -- BUGFIX: this used to patch ISChat.instance.gearButton.onclick
+    -- directly, same pattern as unfocus/onKeyPress above -- but unlike
+    -- those two, gearButton.onclick doesn't stay patched: vanilla's own
+    -- ISChat:prerender() runs every single frame and unconditionally does
+    -- `self.gearButton.onclick = self.onGearButtonClick`, clobbering
+    -- whatever the button's onclick was set to back to vanilla's class
+    -- method within a frame. The shortcut was silently never reachable.
+    -- Overriding the ISChat:onGearButtonClick() METHOD on the instance
+    -- instead survives that reassignment -- prerender re-reads
+    -- self.onGearButtonClick every frame, and an instance-level field
+    -- shadows the class method, so it keeps picking up this override.
+    -- getPlayerContextMenu(0) (NOT ISContextMenu.get, which clears the
+    -- menu) fetches the exact menu vanilla just populated so the new
+    -- option lands alongside it.
     -- ========================================
     if ISChat.instance.gearButton then
-        local original_gearButton_onclick = ISChat.instance.gearButton.onclick
-        ISChat.instance.gearButton.onclick = function(target)
-            if original_gearButton_onclick then
-                original_gearButton_onclick(target)
+        local original_onGearButtonClick = ISChat.instance.onGearButtonClick or ISChat.onGearButtonClick
+        ISChat.instance.onGearButtonClick = function(self)
+            if original_onGearButtonClick then
+                original_onGearButtonClick(self)
             end
 
             local context = getPlayerContextMenu(0)
             if context then
-                context:addOption("Set Speech Color (/hue)...", target, function(chat)
+                context:addOption("Set Speech Color (/hue)...", self, function(chat)
                     if chat and chat.textEntry then
                         chat.textEntry:setText("/hue ")
                         chat:focus()
@@ -896,7 +905,7 @@ local function hookISChat()
                 end)
             end
         end
-        dbg("hookISChat: hooked gearButton.onclick (added /hue shortcut)")
+        dbg("hookISChat: hooked onGearButtonClick method (added /hue shortcut)")
     else
         dbg("hookISChat: gearButton not found, skipping /hue shortcut")
     end
