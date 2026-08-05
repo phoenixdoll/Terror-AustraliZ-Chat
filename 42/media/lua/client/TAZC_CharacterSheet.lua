@@ -100,6 +100,29 @@ end
 -- directly.
 TAZC_CharacterSheet._wrapText = wrapText
 
+-- Static per-breed portrait for a dog sheet, borrowed directly from
+-- CompanionDogs' own shipped art (media/textures/CDPortrait_<breedKey>.png)
+-- rather than the 3D model -- even with the right anim set bound, that came
+-- out visibly distorted (a human-rig model panel isn't built for an animal
+-- skeleton). PZ merges every loaded mod's media folder into one lookup
+-- space, so this resolves fine as long as CompanionDogs is present, which
+-- it must be for a dog sheet to exist at all. Falls back to CompanionDogs'
+-- own generic paw icon, same as its Kennel UI does for the same case.
+local dogPortraitCache = {}
+local function dogPortraitTexture(dog)
+    local CD = _G.CompanionDogs
+    if not CD then return nil end
+    local breedKey = safeGet(function() return CD.getBreed(dog) end, nil) or "default"
+    local tex = dogPortraitCache[breedKey]
+    if tex == nil then
+        tex = getTexture("media/textures/CDPortrait_" .. breedKey .. ".png")
+            or getTexture("media/textures/CDDogPaw_48.png")
+            or false
+        dogPortraitCache[breedKey] = tex
+    end
+    return tex or nil
+end
+
 -- ============================================================================
 -- WINDOW
 -- ============================================================================
@@ -133,39 +156,40 @@ function Sheet:createChildren()
     self.contentTop = self:titleBarHeight() + 8
     self.modelH = self.height - self.contentTop - PAD
 
-    -- Full-body character model on the left (both modes). ISUI3DModel is the
-    -- vanilla panel wrapper -- the same approach Spongie's Character
-    -- Customisation uses on this B42 build: addChild it, then configure.
-    -- Anonymity is enforced per frame by toggling its visibility in render.
-    safeExec(function()
-        self.model = ISUI3DModel:new(PAD, self.contentTop, MODEL_W, self.modelH)
-        self.model.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-        self.model.borderColor = { r = 1, g = 1, b = 1, a = 0 }
-        self:addChild(self.model)
-        if self.isDog then
-            -- A dog needs its own anim set bound before setCharacter, same
-            -- recipe CompanionDogs' own kennel avatar uses -- otherwise the
-            -- model rigs a human skeleton onto the dog and only the one bone
-            -- name that happens to coincide (the head) actually renders.
-            local animSet = safeGet(function() return self.targetPlayer:GetAnimSetName() end, nil)
-            if animSet then safeExec(function() self.model:setAnimSetName(animSet) end) end
-        end
-        self.model:setCharacter(self.targetPlayer)
-        self.model:setDirection(IsoDirections.S)
-        self.model:setState("idle")
-        self.model:setIsometric(false)
-        self.model:setDoRandomExtAnimations(false)
-        self.model:setZoom(MODEL_ZOOM)
-        self.model:setYOffset(MODEL_YOFFSET)
-    end)
-
-    -- Right column geometry (shared by all modes).
-    self.rx = PAD + MODEL_W + 14
-    self.rw = self.width - self.rx - PAD
-    self.nameY = self.contentTop
-    self.taglineLabelY = self.nameY + medH + 8
+    -- Full-body character model on the left. ISUI3DModel is the vanilla
+    -- panel wrapper -- the same approach Spongie's Character Customisation
+    -- uses on this B42 build: addChild it, then configure. Anonymity is
+    -- enforced per frame by toggling its visibility in render.
+    --
+    -- Dogs skip the 3D model entirely: even with the right anim set bound,
+    -- it came out visibly broken/distorted (a human-rig model panel isn't
+    -- built for an animal skeleton). A static per-breed portrait image
+    -- goes in the same slot instead -- see dogPortraitTexture above.
+    if not self.isDog then
+        safeExec(function()
+            self.model = ISUI3DModel:new(PAD, self.contentTop, MODEL_W, self.modelH)
+            self.model.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+            self.model.borderColor = { r = 1, g = 1, b = 1, a = 0 }
+            self:addChild(self.model)
+            self.model:setCharacter(self.targetPlayer)
+            self.model:setDirection(IsoDirections.S)
+            self.model:setState("idle")
+            self.model:setIsometric(false)
+            self.model:setDoRandomExtAnimations(false)
+            self.model:setZoom(MODEL_ZOOM)
+            self.model:setYOffset(MODEL_YOFFSET)
+        end)
+    else
+        self.dogPortrait = dogPortraitTexture(self.targetPlayer)
+    end
 
     if self.isDog then
+        -- Same left-portrait / right-column layout as a player sheet, just
+        -- with a static image in the slot instead of a live 3D model.
+        self.rx = PAD + MODEL_W + 14
+        self.rw = self.width - self.rx - PAD
+        self.nameY = self.contentTop
+
         -- Dog sheet: no tagline/description (dogs don't have one), no
         -- anonymity gate (not part of the human masking system) -- just
         -- the name/breed up top and a private-notes box filling the rest.
@@ -190,6 +214,12 @@ function Sheet:createChildren()
         self:addChild(self.notesSaveButton)
         return
     end
+
+    -- Right column geometry (shared by the two human-player modes below).
+    self.rx = PAD + MODEL_W + 14
+    self.rw = self.width - self.rx - PAD
+    self.nameY = self.contentTop
+    self.taglineLabelY = self.nameY + medH + 8
 
     if not self.editable then
         -- Read-only sheet of another player. The ONE editable thing is your
@@ -303,7 +333,14 @@ function Sheet:renderContent()
         local slotX, slotY, slotW, slotH = PAD, self.contentTop, MODEL_W, self.modelH
         self:drawRect(slotX, slotY, slotW, slotH, 0.35, 0, 0, 0)
         self:drawRectBorder(slotX, slotY, slotW, slotH, 0.5, 0.5, 0.5, 0.55)
-        if self.model then safeExec(function() self.model:setVisible(true) end) end
+        if self.dogPortrait then
+            -- Aspect-preserving: the slot is tall and narrow (matches the
+            -- old full-body model panel), but a breed portrait is closer to
+            -- square -- a plain scaled draw would stretch it noticeably.
+            safeExec(function()
+                self:drawTextureScaledAspect(self.dogPortrait, slotX, slotY, slotW, slotH, 1, 1, 1, 1)
+            end)
+        end
 
         local rx = self.rx
         local y = self.contentTop
