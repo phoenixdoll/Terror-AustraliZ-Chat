@@ -1086,13 +1086,14 @@ local function onViewBio(player)
     end
 end
 
--- Find an IsoPlayer under the cursor: walks worldObjects -> square ->
--- movingObjects, returning the first IsoPlayer found.
+-- Walk worldObjects -> square -> movingObjects, returning the first one
+-- matching `predicate`. Shared core so the IsoPlayer and IsoAnimal (dog)
+-- lookups below can't drift out of sync with each other.
 --
 -- Internal contract: shared with TAZC_Avatar and TAZC_LangAdmin's own
 -- context-menu handlers, which mirrored this exact resolution before
 -- converging on it -- a click can only ever resolve one way.
-local function findClickedPlayer(worldObjects)
+local function findClickedMovingObject(worldObjects, predicate)
     for _, worldObj in ipairs(worldObjects or {}) do
         local square = safeGet(function() return worldObj:getSquare() end, nil)
         if square then
@@ -1101,7 +1102,7 @@ local function findClickedPlayer(worldObjects)
                 local objCount = safeGet(function() return movingObjects:size() end, 0)
                 for j = 0, objCount - 1 do
                     local obj = safeGet(function() return movingObjects:get(j) end, nil)
-                    if obj and instanceof(obj, "IsoPlayer") then
+                    if obj and predicate(obj) then
                         return obj
                     end
                 end
@@ -1110,7 +1111,25 @@ local function findClickedPlayer(worldObjects)
     end
     return nil
 end
+
+-- Some mods (e.g. CompanionDogs) build their animals in a way that also
+-- satisfies instanceof(obj, "IsoPlayer") -- exclude anything that's ALSO
+-- an IsoAnimal so a right-clicked pet never resolves as "a player" here,
+-- regardless of why the engine double-matches it. Real pets are handled
+-- by findClickedDog below instead.
+local function findClickedPlayer(worldObjects)
+    return findClickedMovingObject(worldObjects, function(obj)
+        return instanceof(obj, "IsoPlayer") and not instanceof(obj, "IsoAnimal")
+    end)
+end
 TAZC_Bio._findClickedPlayer = findClickedPlayer
+
+local function findClickedDog(worldObjects)
+    return findClickedMovingObject(worldObjects, function(obj)
+        return instanceof(obj, "IsoAnimal")
+    end)
+end
+TAZC_Bio._findClickedDog = findClickedDog
 
 local function onContextMenu(player, context, worldObjects, test)
     if test then return true end
@@ -1132,6 +1151,20 @@ local function onContextMenu(player, context, worldObjects, test)
                 else
                     context:addOption("View Character Sheet", clickedPlayer, onViewBio)
                 end
+            end)
+        end
+        return
+    end
+
+    -- No player under the cursor -- check for a pet (currently: CompanionDogs
+    -- dogs). Same sheet window, dog-flavoured: breed/given name instead of a
+    -- masked stranger, and just the private-notes box (no tagline/bio, dogs
+    -- don't have one).
+    if _G.CompanionDogs then
+        local clickedDog = findClickedDog(worldObjects)
+        if clickedDog then
+            safeExec(function()
+                context:addOption("View Dog Sheet", clickedDog, onViewBio)
             end)
         end
     end

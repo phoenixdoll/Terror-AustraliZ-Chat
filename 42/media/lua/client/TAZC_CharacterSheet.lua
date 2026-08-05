@@ -117,6 +117,8 @@ function Sheet:new(x, y, w, h)
     o.targetUsername = nil
     o.realName = nil
     o.editable = false
+    o.isDog = false
+    o.breedName = nil
     -- Semi-transparent body so the game shows through behind the card.
     o.backgroundColor = { r = 0.05, g = 0.05, b = 0.08, a = BG_ALPHA }
     return o
@@ -140,6 +142,14 @@ function Sheet:createChildren()
         self.model.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
         self.model.borderColor = { r = 1, g = 1, b = 1, a = 0 }
         self:addChild(self.model)
+        if self.isDog then
+            -- A dog needs its own anim set bound before setCharacter, same
+            -- recipe CompanionDogs' own kennel avatar uses -- otherwise the
+            -- model rigs a human skeleton onto the dog and only the one bone
+            -- name that happens to coincide (the head) actually renders.
+            local animSet = safeGet(function() return self.targetPlayer:GetAnimSetName() end, nil)
+            if animSet then safeExec(function() self.model:setAnimSetName(animSet) end) end
+        end
         self.model:setCharacter(self.targetPlayer)
         self.model:setDirection(IsoDirections.S)
         self.model:setState("idle")
@@ -149,11 +159,37 @@ function Sheet:createChildren()
         self.model:setYOffset(MODEL_YOFFSET)
     end)
 
-    -- Right column geometry (shared by both modes).
+    -- Right column geometry (shared by all modes).
     self.rx = PAD + MODEL_W + 14
     self.rw = self.width - self.rx - PAD
     self.nameY = self.contentTop
     self.taglineLabelY = self.nameY + medH + 8
+
+    if self.isDog then
+        -- Dog sheet: no tagline/description (dogs don't have one), no
+        -- anonymity gate (not part of the human masking system) -- just
+        -- the name/breed up top and a private-notes box filling the rest.
+        local saveY = self.height - 30
+        local notesTop = self.nameY + medH + 8 + lineH + 8
+        local notesH = math.max(60, saveY - 8 - notesTop)
+        local notesY = saveY - 8 - notesH
+        self.notesLabelY = notesY - lineH - 2
+
+        self.initialNote = TAZC_Bio.getNote(self.targetUsername) or ""
+        self.lastSetNote = self.initialNote
+
+        self.notesEntry = ISTextEntryBox:new(self.initialNote, self.rx, notesY, self.rw, notesH)
+        self.notesEntry:initialise()
+        self.notesEntry:instantiate()
+        self.notesEntry:setMultipleLine(true)
+        self.notesEntry:setMaxTextLength(TAZC_Bio.MAX_DESCRIPTION_LENGTH)
+        self:addChild(self.notesEntry)
+
+        self.notesSaveButton = ISButton:new(self.rx + self.rw - 60, saveY, 60, 22, "Save", self, Sheet.onSaveNote)
+        self.notesSaveButton:initialise()
+        self:addChild(self.notesSaveButton)
+        return
+    end
 
     if not self.editable then
         -- Read-only sheet of another player. The ONE editable thing is your
@@ -263,6 +299,29 @@ function Sheet:renderContent()
     local lineH = tm:getFontHeight(UIFont.Small) + 2
     local medH = tm:getFontHeight(UIFont.Medium)
 
+    if self.isDog then
+        local slotX, slotY, slotW, slotH = PAD, self.contentTop, MODEL_W, self.modelH
+        self:drawRect(slotX, slotY, slotW, slotH, 0.35, 0, 0, 0)
+        self:drawRectBorder(slotX, slotY, slotW, slotH, 0.5, 0.5, 0.5, 0.55)
+        if self.model then safeExec(function() self.model:setVisible(true) end) end
+
+        local rx = self.rx
+        local y = self.contentTop
+        local hasName = self.realName and self.realName ~= ""
+        self:drawText(hasName and self.realName or (self.breedName or "A Dog"), rx, y, 1, 1, 1, 1, UIFont.Medium)
+        y = y + medH + 8
+
+        if hasName and self.breedName then
+            self:drawText(self.breedName, rx, y, 0.75, 0.78, 0.9, 1, UIFont.Small)
+        end
+
+        if self.notesLabelY then
+            self:drawText("Personal notes (only you see this)", rx, self.notesLabelY,
+                0.75, 0.78, 0.9, 1, UIFont.Small)
+        end
+        return
+    end
+
     -- Anonymity resolution (others only). Runs every frame, so if they mask up
     -- or walk out of sight while the window is open, the card updates live.
     --
@@ -366,15 +425,46 @@ function TAZC_CharacterSheet.open(targetPlayer)
     local localPlayer = getPlayer()
     if not localPlayer then return end
 
-    local username = safeGet(function() return targetPlayer:getUsername() end, nil)
-    if not username then return end
-    local localUsername = safeGet(function() return localPlayer:getUsername() end, "")
+    local isDog = safeGet(function() return instanceof(targetPlayer, "IsoAnimal") end, false)
 
-    -- Refresh from the server so the sheet shows current data.
-    TAZC_Bio.requestTagline(username)
-    TAZC_Bio.requestDescription(username)
-    if username ~= localUsername then
-        TAZC_Bio.requestNote(username)   -- my private note about them
+    local noteKey, editable, realName, breedName
+    if isDog then
+        -- Pets (currently: CompanionDogs) never have an account username --
+        -- key notes off the engine's own per-animal ID instead, which is
+        -- stable across copyFrom and save/load (unlike CompanionDogs' own
+        -- ModData uid, which copyFrom wipes).
+        local animalId = safeGet(function() return targetPlayer:getAnimalID() end, nil)
+        if not animalId then return end
+        noteKey = "dog:" .. tostring(animalId)
+        editable = false
+
+        local CD = _G.CompanionDogs
+        if CD then
+            realName = safeGet(function() return CD.data(targetPlayer).name end, nil)
+            breedName = safeGet(function() return CD.breedNoun(targetPlayer) end, nil)
+        end
+        TAZC_Bio.requestNote(noteKey)   -- my private note about this dog
+    else
+        local username = safeGet(function() return targetPlayer:getUsername() end, nil)
+        if not username then return end
+        local localUsername = safeGet(function() return localPlayer:getUsername() end, "")
+
+        -- Refresh from the server so the sheet shows current data.
+        TAZC_Bio.requestTagline(username)
+        TAZC_Bio.requestDescription(username)
+        if username ~= localUsername then
+            TAZC_Bio.requestNote(username)   -- my private note about them
+        end
+
+        noteKey = username
+        editable = (username == localUsername)
+        -- BUGFIX: was `or username` -- on a failed character-name lookup this
+        -- fell back to the raw ACCOUNT username, not the character's in-fiction
+        -- name. Account identity is transport-layer, never a public display
+        -- name; a neutral "Someone" fallback matches the fail-closed default
+        -- the anonymity resolution above already uses.
+        realName = TAZC_Bio._getCharacterName(targetPlayer, username)
+            or (TAZC_Anonymity.Config and TAZC_Anonymity.Config.distantName) or "Someone"
     end
 
     -- Single reusable window.
@@ -388,15 +478,11 @@ function TAZC_CharacterSheet.open(targetPlayer)
 
     local win = Sheet:new(math.floor((sw - WIN_W) / 2), math.floor((sh - WIN_H) / 2), WIN_W, WIN_H)
     win.targetPlayer = targetPlayer
-    win.targetUsername = username
-    -- BUGFIX: was `or username` -- on a failed character-name lookup this
-    -- fell back to the raw ACCOUNT username, not the character's in-fiction
-    -- name. Account identity is transport-layer, never a public display
-    -- name; a neutral "Someone" fallback matches the fail-closed default
-    -- the anonymity resolution above already uses.
-    win.realName = TAZC_Bio._getCharacterName(targetPlayer, username)
-        or (TAZC_Anonymity.Config and TAZC_Anonymity.Config.distantName) or "Someone"
-    win.editable = (username == localUsername)
+    win.targetUsername = noteKey
+    win.isDog = isDog
+    win.realName = realName
+    win.breedName = breedName
+    win.editable = editable
 
     local ok = safeExec(function()
         win:initialise()
@@ -405,7 +491,7 @@ function TAZC_CharacterSheet.open(targetPlayer)
         win:bringToTop()
     end)
     if ok then instance = win end
-    dbg("open: %s (editable=%s)", username, tostring(win.editable))
+    dbg("open: %s (editable=%s, isDog=%s)", tostring(noteKey), tostring(win.editable), tostring(isDog))
 end
 
 dbg("=== TAZC_CharacterSheet module loaded ===")
