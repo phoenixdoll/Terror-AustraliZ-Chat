@@ -40,6 +40,7 @@
 local TAZC_Core = require("TAZC_Core")
 local TAZC_Config = require("TAZC_Config")
 local TAZC_Radio = require("TAZC_Radio")
+local TAZC_Json = require("TAZC_Json")
 local dbg = TAZC_Core.debugger("BRIDGE")
 
 TAZC_Bridge = TAZC_Bridge or {}
@@ -492,5 +493,144 @@ print("[TAZC-BRIDGE] Discord bridge active (folded into TAZC_Bridge.lua): "
     .. string.format("frequency=%d outbox=%s inbox=%s poll=%dms",
         TAZC_DiscordBridge.BRIDGE_FREQUENCY, TAZC_DiscordBridge.OUTBOX_FILE,
         TAZC_DiscordBridge.INBOX_FILE, TAZC_DiscordBridge.POLL_INTERVAL_MS))
+
+-- ============================================================================
+-- SERVER STATUS EXPORT
+--
+-- RCON has no query commands for in-game date/time or weather (checked
+-- directly against the game's own command strings) -- so, for the same
+-- reason the Discord radio bridge above talks through plain files instead
+-- of a direct call, the server periodically overwrites a snapshot file that
+-- an external bot (WhitelistManager's /time and /weather) reaches over
+-- SFTP. This is a truncating overwrite, not an append log like
+-- outbox.txt/inbox.txt above -- only the latest snapshot ever matters.
+-- ============================================================================
+
+local TAZC_Status = {}
+TAZC_Bridge.Status = TAZC_Status
+
+TAZC_Status.FILE = "TAZC/discordbridge/status.json"
+
+-- Real seconds, not in-game time, so this stays fresh regardless of the
+-- server's time multiplier.
+TAZC_Status.WRITE_INTERVAL_MS = 60000
+
+local dbgStatus = TAZC_Core.debugger("STATUS")
+
+local MONTH_NAMES = {
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+}
+
+-- Nil-writer case checked before safeExec's pcall, not raised via error()
+-- -- see appendOutbox above for why.
+local function writeStatusFile(jsonText)
+    local writer = getFileWriter(TAZC_Status.FILE, true, false)
+    if not writer then
+        print("[TAZC-STATUS] WARNING: status write failed: getFileWriter returned nil")
+        return
+    end
+    local ok, err = TAZC_Core.safeExec(function()
+        writer:write(jsonText)
+        writer:close()
+    end)
+    if not ok then
+        print(string.format("[TAZC-STATUS] WARNING: status write failed: %s", tostring(err)))
+    end
+end
+
+-- Pulls one forecast object (from getClimateForecaster():getForecast(n))
+-- into a plain table. Wrapped in the caller's pcall -- a forecaster that
+-- isn't ready yet (e.g. very early in server boot) is treated as "no
+-- forecast available this cycle", not a hard error.
+local function forecastToTable(forecast)
+    return {
+        tempMean = forecast:getTemperature():getTotalMean(),
+        tempMin = forecast:getTemperature():getTotalMin(),
+        tempMax = forecast:getTemperature():getTotalMax(),
+        windMean = forecast:getWindPower():getTotalMean(),
+        cloudMean = forecast:getCloudiness():getTotalMean(),
+        humidityMean = forecast:getHumidity():getTotalMean(),
+        hasFog = forecast:isHasFog() and true or false,
+        hasHeavyRain = forecast:isHasHeavyRain() and true or false,
+        hasStorm = forecast:isHasStorm() and true or false,
+        hasTropicalStorm = forecast:isHasTropicalStorm() and true or false,
+        hasBlizzard = forecast:isHasBlizzard() and true or false,
+        chanceOnSnow = forecast:isChanceOnSnow() and true or false,
+        weatherStartTime = forecast:getWeatherStartTime(),
+        weatherEndTime = forecast:getWeatherEndTime(),
+        weatherStarts = forecast:isWeatherStarts() and true or false,
+    }
+end
+
+local function buildStatusPayload()
+    local gameTime = getGameTime()
+    local clim = getClimateManager()
+
+    -- getTimeOfDay() returns the fraction of the current day elapsed
+    -- (0..1) -- the same source SFarmingSystem.lua/season.lua use to derive
+    -- the current hour server-side. There's no direct getMinute() on
+    -- GameTime, so minutes are derived from the same fraction.
+    local totalMinutes = math.floor((gameTime:getTimeOfDay() or 0) * 24 * 60)
+
+    local payload = {
+        writtenAt = os.time(),
+        day = gameTime:getDay(),
+        -- getMonth() is 0-indexed (confirmed by vanilla season.lua indexing
+        -- a 12-entry table with getMonth()+1).
+        month = MONTH_NAMES[(gameTime:getMonth() or 0) + 1] or "?",
+        hour = math.floor(totalMinutes / 60) % 24,
+        minute = totalMinutes % 60,
+        nightsSurvived = gameTime:getNightsSurvived(),
+        season = clim:getSeasonName(),
+        current = {
+            rain = clim:getPrecipitationIntensity(),
+            snow = clim:getSnowStrength(),
+            fog = clim:getFogIntensity(),
+            wind = clim:getWindPower(),
+            thunderstorm = clim:getThunderStorm() and true or false,
+        },
+    }
+
+    local okForecast, forecast = pcall(function()
+        return clim:getClimateForecaster():getForecast(1)
+    end)
+    if okForecast and forecast then
+        local okTable, forecastTable = pcall(forecastToTable, forecast)
+        if okTable then
+            payload.forecastTomorrow = forecastTable
+        else
+            dbgStatus("buildStatusPayload: forecastToTable failed: %s", tostring(forecastTable))
+        end
+    end
+
+    return payload
+end
+
+local lastStatusWriteMs = 0
+
+local function onStatusTick()
+    local now = TAZC_Core.getTimeMs()
+    if now - lastStatusWriteMs < TAZC_Status.WRITE_INTERVAL_MS then return end
+    lastStatusWriteMs = now
+
+    local ok, result = pcall(function()
+        local payload = buildStatusPayload()
+        local encoded = TAZC_Json.encode(payload)
+        if not encoded then error("TAZC_Json.encode returned nil") end
+        writeStatusFile(encoded)
+        return encoded
+    end)
+    if not ok then
+        print(string.format("[TAZC-STATUS] WARNING: status export failed: %s", tostring(result)))
+    else
+        dbgStatus("onStatusTick: wrote %d bytes to %s", #result, TAZC_Status.FILE)
+    end
+end
+
+Events.OnTick.Add(onStatusTick)
+
+print("[TAZC-BRIDGE] Server status export active: file=" .. TAZC_Status.FILE
+    .. " interval=" .. tostring(TAZC_Status.WRITE_INTERVAL_MS) .. "ms")
 
 return TAZC_Bridge
