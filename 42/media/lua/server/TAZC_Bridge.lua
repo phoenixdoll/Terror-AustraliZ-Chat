@@ -500,10 +500,26 @@ print("[TAZC-BRIDGE] Discord bridge active (folded into TAZC_Bridge.lua): "
 -- RCON has no query commands for in-game date/time or weather (checked
 -- directly against the game's own command strings) -- so, for the same
 -- reason the Discord radio bridge above talks through plain files instead
--- of a direct call, the server periodically overwrites a snapshot file that
--- an external bot (WhitelistManager's /time and /weather) reaches over
--- SFTP. This is a truncating overwrite, not an append log like
--- outbox.txt/inbox.txt above -- only the latest snapshot ever matters.
+-- of a direct call, the server periodically appends a snapshot line to a
+-- file that an external bot (WhitelistManager's /time and /weather) reaches
+-- over SFTP.
+--
+-- APPEND-ONLY, NOT TRUNCATING -- confirmed live on the real server
+-- (2026-08-07 reset) that getFileWriter(path, true, false) (create,
+-- truncate) reliably returns nil here, and TAZC_Persist's identical
+-- truncate-mode call failed the exact same way for TAZC_Notes_a/b.json --
+-- files that had written fine for months before that reset wiped them to
+-- nonexistent. Even seeding the file into existence first (an append-mode
+-- open/close, then retrying the truncating open) still failed. Meanwhile
+-- getFileWriter(path, true, true) (append) has never failed once, on this
+-- file or on outbox.txt/inbox.txt above -- so this now follows that exact
+-- same proven append-only shape instead of fighting truncate mode: write
+-- one JSON line per cycle, never overwrite from the Lua side. The bot reads
+-- the newest line and then clears the file itself over SFTP (a real
+-- external truncate, which -- unlike PZ's own getFileWriter -- is confirmed
+-- to work fine: this is exactly how DiscordBridge's read_and_clear already
+-- keeps outbox.txt from growing unboundedly), so growth is bounded the same
+-- way it already is for the radio bridge.
 -- ============================================================================
 
 local TAZC_Status = {}
@@ -523,34 +539,17 @@ local MONTH_NAMES = {
 }
 
 -- Nil-writer case checked before safeExec's pcall, not raised via error()
--- -- see appendOutbox above for why.
---
--- getFileWriter(path, true, false) (create-if-missing, truncate) reliably
--- returns nil when `path` doesn't exist yet at all -- confirmed live on the
--- real server (2026-08-07 reset): TAZC_Persist's identical truncate-mode
--- call was failing the exact same way for TAZC_Notes_a/b.json, files that
--- had written fine for months before that reset wiped them back to
--- nonexistent. getFileWriter(path, true, true) (append) does NOT have this
--- problem -- appendOutbox's outbox.txt was recreated successfully the same
--- session. So: if the truncating open fails, "seed" the file into
--- existence with one append-mode open/close first (writes nothing), then
--- retry the truncating open once against a now-existing file -- the same
--- state every prior successful write on this server was already in.
+-- -- see appendOutbox above for why. Appends one JSON line (writeln, not
+-- write -- see appendOutbox's identical use of writeln for the newline
+-- delimiter every reader here relies on).
 local function writeStatusFile(jsonText)
-    local writer = getFileWriter(TAZC_Status.FILE, true, false)
+    local writer = getFileWriter(TAZC_Status.FILE, true, true)
     if not writer then
-        local seedWriter = getFileWriter(TAZC_Status.FILE, true, true)
-        if seedWriter then
-            seedWriter:close()
-            writer = getFileWriter(TAZC_Status.FILE, true, false)
-        end
-    end
-    if not writer then
-        print("[TAZC-STATUS] WARNING: status write failed: getFileWriter returned nil (even after seeding via append mode)")
+        print("[TAZC-STATUS] WARNING: status write failed: getFileWriter returned nil")
         return
     end
     local ok, err = TAZC_Core.safeExec(function()
-        writer:write(jsonText)
+        writer:writeln(jsonText)
         writer:close()
     end)
     if not ok then
