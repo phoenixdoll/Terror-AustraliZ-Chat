@@ -504,28 +504,43 @@ print("[TAZC-BRIDGE] Discord bridge active (folded into TAZC_Bridge.lua): "
 -- file that an external bot (WhitelistManager's /time and /weather) reaches
 -- over SFTP.
 --
--- APPEND-ONLY, NOT TRUNCATING -- confirmed live on the real server
--- (2026-08-07 reset) that getFileWriter(path, true, false) (create,
--- truncate) reliably returns nil here, and TAZC_Persist's identical
--- truncate-mode call failed the exact same way for TAZC_Notes_a/b.json --
--- files that had written fine for months before that reset wiped them to
--- nonexistent. Even seeding the file into existence first (an append-mode
--- open/close, then retrying the truncating open) still failed. Meanwhile
--- getFileWriter(path, true, true) (append) has never failed once, on this
--- file or on outbox.txt/inbox.txt above -- so this now follows that exact
--- same proven append-only shape instead of fighting truncate mode: write
--- one JSON line per cycle, never overwrite from the Lua side. The bot reads
--- the newest line and then clears the file itself over SFTP (a real
--- external truncate, which -- unlike PZ's own getFileWriter -- is confirmed
--- to work fine: this is exactly how DiscordBridge's read_and_clear already
--- keeps outbox.txt from growing unboundedly), so growth is bounded the same
--- way it already is for the radio bridge.
+-- STATUS AS OF 2026-08-07 -- STILL UNRESOLVED, read before touching this:
+--
+-- getFileWriter(path, true, false) (create, truncate) reliably returns nil
+-- for this file. TAZC_Persist's identical truncate-mode call fails the same
+-- way for every one of its stores (TAZC_Notes_a/b.json etc.) -- but there
+-- is NO evidence any of those ever actually saved successfully at any
+-- point; "no save data found; starting fresh" at boot does not prove prior
+-- success, and this mod has existed under a week, so "it used to work" was
+-- a bad, unverified assumption made earlier tonight -- don't repeat it.
+--
+-- Switching this file to append-only (write one JSON line per cycle
+-- instead of overwriting, matching outbox.txt/inbox.txt's proven shape --
+-- see DiscordBridge/bot.py's read_and_clear, which truncates this file
+-- externally over SFTP and IS confirmed to work, unlike PZ's own truncate)
+-- did NOT fix it either: confirmed live that appends to this exact path
+-- still fail even against a freshly-deleted, nonexistent file, while
+-- outbox.txt/inbox.txt (same directory, same append-mode call shape)
+-- continue working throughout.
+--
+-- Leading untested theory: the target's file EXTENSION may matter --
+-- every failing write tonight targets a `.json` file, every succeeding one
+-- targets `.txt`. Not yet isolated from the OnTick-vs-other-event-context
+-- difference (this file's write fires from Events.OnTick; outbox.txt's
+-- "game -> Discord" writes fire from chat/network command handling, not
+-- OnTick). Next step, if this is revisited: change TAZC_Status.FILE's
+-- extension to `.txt` (content stays JSON) as a cheap, decisive test --
+-- do NOT re-attempt truncate-mode or seed-then-retry, both already
+-- disproven live against this server.
 -- ============================================================================
 
 local TAZC_Status = {}
 TAZC_Bridge.Status = TAZC_Status
 
-TAZC_Status.FILE = "TAZC/discordbridge/status.json"
+-- .txt, not .json -- testing the leading theory above that file extension
+-- is what determines whether getFileWriter succeeds on this server.
+-- Content is still JSON, only the filename changed.
+TAZC_Status.FILE = "TAZC/discordbridge/status.txt"
 
 -- Real seconds, not in-game time, so this stays fresh regardless of the
 -- server's time multiplier.

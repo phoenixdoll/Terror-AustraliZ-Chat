@@ -101,16 +101,26 @@ end
 -- write/close exceptions -- which should be rare -- still go through
 -- safeExec and get the full trace, which is useful there.
 --
--- getFileWriter(path, true, false) (create-if-missing, truncate) has been
--- observed live returning nil specifically when `path` doesn't exist on
--- disk at all yet -- confirmed against this exact function on the real
--- server after a 2026-08-07 reset wiped every slot file (Notes, Taglines,
--- Hues, etc.) back to nonexistent; every one failed here identically.
--- getFileWriter(path, true, true) (append) does not have this problem, so
--- if the truncating open fails, seed the file into existence with one
--- append-mode open/close (writes nothing) and retry the truncating open
--- once against a now-existing file -- the same state every prior
--- successful write on this server was already in before the reset.
+-- STATUS AS OF 2026-08-07 -- the seed-then-retry below is UNVERIFIED and
+-- likely does not actually work. getFileWriter(path, true, false) (create,
+-- truncate) was observed live returning nil for every slot file here
+-- (Notes, Taglines, Hues, etc.) after a server reset wiped them to
+-- nonexistent -- but there's no real evidence any of them ever saved
+-- successfully in the first place; this mod is under a week old, and "no
+-- save data found; starting fresh" at boot doesn't prove prior success.
+-- Don't assume that.
+--
+-- The seed-then-retry pattern below (open once in append mode to force
+-- creation, then retry the truncating open) was written on the theory that
+-- append mode doesn't share truncate mode's problem. That theory was
+-- directly disproven the same night for TAZC_Bridge.lua's near-identical
+-- status.json write: pure append mode, even against a freshly-deleted
+-- nonexistent file, still failed to create it. This code was never
+-- reverted/redesigned to match that finding -- next session should start
+-- there instead of trusting this comment or this function's success.
+-- Current leading theory (also untested against this function): the
+-- target's file EXTENSION matters -- every `.json` write failed, every
+-- `.txt` write (outbox.txt/inbox.txt) succeeded, all night, no exceptions.
 local function writeAll(fileName, content)
     local writer = getFileWriter(fileName, true, false)
     if not writer then
