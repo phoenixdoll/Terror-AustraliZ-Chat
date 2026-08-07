@@ -223,10 +223,17 @@ local function readTextFile(relPath)
     return content
 end
 
+-- Nil-writer case checked before safeExec's pcall, not raised via error():
+-- PZ's Kahlua VM dumps a full stack trace to the DebugLog for every error()
+-- call even when pcall catches it, so this expected/recoverable failure
+-- shouldn't be routed through it (see TAZC_Persist.lua's writeAll).
 local function writeTextFile(relPath, content)
+    local writer = getFileWriter(relPath, true, false)
+    if not writer then
+        dbg("writeTextFile: getFileWriter returned nil for %s", relPath)
+        return false
+    end
     return safeExec(function()
-        local writer = getFileWriter(relPath, true, false)
-        if not writer then error("getFileWriter returned nil") end
         writer:write(content)
         writer:close()
     end)

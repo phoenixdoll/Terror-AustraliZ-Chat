@@ -92,10 +92,21 @@ local function readAll(fileName)
 end
 
 -- Write a string to a file (truncating). Returns true on apparent success.
+--
+-- The nil-writer case is checked outside safeExec's pcall, not raised via
+-- error(): PZ's Kahlua VM dumps a full Java/Lua stack trace to the DebugLog
+-- for every error() call regardless of whether pcall catches it, so routing
+-- an expected/recoverable failure (a transient nil from getFileWriter)
+-- through error() turns one log line into ~35 lines of noise. Only genuine
+-- write/close exceptions -- which should be rare -- still go through
+-- safeExec and get the full trace, which is useful there.
 local function writeAll(fileName, content)
+    local writer = getFileWriter(fileName, true, false)
+    if not writer then
+        warn("write of '%s' failed: getFileWriter returned nil", fileName)
+        return false
+    end
     local ok, err = TAZC_Core.safeExec(function()
-        local writer = getFileWriter(fileName, true, false)
-        if not writer then error("getFileWriter returned nil") end
         writer:write(content)
         writer:close()
     end)

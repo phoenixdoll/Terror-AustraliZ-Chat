@@ -261,10 +261,17 @@ TAZC_DiscordBridge.GROUND_RADIO_RANGE = 120
 
 local lastPollMs = 0
 
+-- Nil-writer case checked before safeExec's pcall, not raised via error():
+-- PZ's Kahlua VM dumps a full stack trace to the DebugLog for every error()
+-- call even when pcall catches it, so this expected/recoverable failure
+-- shouldn't be routed through it (see TAZC_Persist.lua's writeAll).
 local function appendOutbox(line)
+    local writer = getFileWriter(TAZC_DiscordBridge.OUTBOX_FILE, true, true)
+    if not writer then
+        print("[TAZC-DISCORDBRIDGE] WARNING: outbox write failed: getFileWriter returned nil")
+        return
+    end
     local ok, err = TAZC_Core.safeExec(function()
-        local writer = getFileWriter(TAZC_DiscordBridge.OUTBOX_FILE, true, true)
-        if not writer then error("getFileWriter returned nil") end
         writer:writeln(line)
         writer:close()
     end)
@@ -317,10 +324,16 @@ local function drainInbox()
     end)
     if not readOk or #lines == 0 then return readOk and lines or {} end
 
+    -- Nil-writer case checked before safeExec's pcall, not raised via
+    -- error() -- see appendOutbox above for why.
+    local inboxWriter = getFileWriter(TAZC_DiscordBridge.INBOX_FILE, true, false)
+    if not inboxWriter then
+        print("[TAZC-DISCORDBRIDGE] WARNING: inbox clear failed, message(s) may replay: " ..
+            "getFileWriter returned nil")
+        return lines
+    end
     local clearOk, clearErr = TAZC_Core.safeExec(function()
-        local writer = getFileWriter(TAZC_DiscordBridge.INBOX_FILE, true, false)
-        if not writer then error("getFileWriter returned nil") end
-        writer:close()
+        inboxWriter:close()
     end)
     if not clearOk then
         print(string.format(

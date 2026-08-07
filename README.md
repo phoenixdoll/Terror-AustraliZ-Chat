@@ -49,7 +49,7 @@ releases.
 > chat no longer pretends to be private, radio respects the anonymity
 > system, learned words fade gently instead of vanishing, teaching works
 > without typing accented characters, and the mod now *tells you* when it
-> declines to do something instead of staying silent. New: `/mc` lists the
+> declines to do something instead of staying silent. New: `/tazc` lists the
 > commands in-game, `/forget <language>` lets you let a learned language go,
 > and three new sandbox options (Language Barrier on/off, Languages After
 > Death, Learning Speed). Three features ride the same cut: **chat
@@ -287,7 +287,7 @@ releases.
 | `/lex` | -- | List native + learning languages and acquired vocabulary (v8.2+) |
 | `/comp` | -- | Estimate comprehension percentage per language (v8.2+) |
 | `/forget <language>` | -- | Let a language you've been learning go -- previews what you'd lose, then `/forget <language> confirm` (v8.16.2+) |
-| `/mc` | -- | List Terror AustraliZ Chat commands in-game (v8.16.2+) |
+| `/tazc` | -- | List Terror AustraliZ Chat commands in-game (v8.16.2+) |
 
 Text without a command prefix uses the Say channel.
 

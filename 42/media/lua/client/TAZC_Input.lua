@@ -258,7 +258,7 @@ end
     Local player's access level, lowercased ("admin", "moderator", ...).
     Returns nil when it can't be read positively -- callers must treat nil
     as UNKNOWN, not as denial. Client-side only: every admin surface is
-    re-gated server-side; this merely shapes local UX (usage lines, /mc
+    re-gated server-side; this merely shapes local UX (usage lines, /tazc
     help extras, sparing non-admins a round-trip).
 ]]
 local function localAccessLevel()
@@ -301,7 +301,7 @@ addUsage({"/roll", "/r"}, "Usage: /roll 2d6  (or /r) -- also d20, 4d10+4. The re
 addUsage({"/hue"}, "Usage: /hue #RRGGBB or /hue r,g,b (0-255) -- the color your name speaks in; /hue reset for your natural shade.")
 addUsage({"/name"}, "Usage: /name <new name> -- renames your own character (e.g. /name Jane Doe).")
 
--- /mc help: the player-facing command list. Player commands only -- the
+-- /tazc help: the player-facing command list. Player commands only -- the
 -- admin surfaces (/lang grant, etc.) stay out of it. Staff
 -- see one extra /event line, appended at print time in handleLocalCommand.
 local TAZC_HELP = {
@@ -325,15 +325,15 @@ local TAZC_HELP = {
 }
 
 --[[
-    Answer bare command forms and /mc locally
+    Answer bare command forms and /tazc locally
     @param text  Raw input text (starts with "/", unknown to parsePrefix)
     @return true if handled (feedback printed), false to fall through
 ]]
 local function handleLocalCommand(text)
     local cmd = text:lower():match("^%s*(.-)%s*$")
 
-    -- /mc, /mc help: command discovery
-    if cmd == "/mc" or cmd == "/mc help" then
+    -- /tazc, /tazc help: command discovery
+    if cmd == "/tazc" or cmd == "/tazc help" then
         for _, line in ipairs(TAZC_HELP) do
             localSysMsg(line)
         end
@@ -342,7 +342,7 @@ local function handleLocalCommand(text)
         if level and level ~= "none" then
             localSysMsg("  /event <narration> -- narrate an event, heard at double yell range (admin)")
         end
-        dbg("handleLocalCommand: printed /mc help")
+        dbg("handleLocalCommand: printed /tazc help")
         return true
     end
 
@@ -603,7 +603,7 @@ local function hookISChat()
                 lastMessageSentTime = TAZC_Core.getTimeMs()
                 return true  -- We handled it
             elseif handleLocalCommand(text) then
-                -- Bare command form ("/roll", "/tell") or /mc help: answered
+                -- Bare command form ("/roll", "/tell") or /tazc help: answered
                 -- locally with a usage line, nothing to send.
                 dbg("interceptCommand: handled locally (bare command)")
                 chatInstance.textEntry:setText("")
