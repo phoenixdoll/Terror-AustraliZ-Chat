@@ -524,10 +524,29 @@ local MONTH_NAMES = {
 
 -- Nil-writer case checked before safeExec's pcall, not raised via error()
 -- -- see appendOutbox above for why.
+--
+-- getFileWriter(path, true, false) (create-if-missing, truncate) reliably
+-- returns nil when `path` doesn't exist yet at all -- confirmed live on the
+-- real server (2026-08-07 reset): TAZC_Persist's identical truncate-mode
+-- call was failing the exact same way for TAZC_Notes_a/b.json, files that
+-- had written fine for months before that reset wiped them back to
+-- nonexistent. getFileWriter(path, true, true) (append) does NOT have this
+-- problem -- appendOutbox's outbox.txt was recreated successfully the same
+-- session. So: if the truncating open fails, "seed" the file into
+-- existence with one append-mode open/close first (writes nothing), then
+-- retry the truncating open once against a now-existing file -- the same
+-- state every prior successful write on this server was already in.
 local function writeStatusFile(jsonText)
     local writer = getFileWriter(TAZC_Status.FILE, true, false)
     if not writer then
-        print("[TAZC-STATUS] WARNING: status write failed: getFileWriter returned nil")
+        local seedWriter = getFileWriter(TAZC_Status.FILE, true, true)
+        if seedWriter then
+            seedWriter:close()
+            writer = getFileWriter(TAZC_Status.FILE, true, false)
+        end
+    end
+    if not writer then
+        print("[TAZC-STATUS] WARNING: status write failed: getFileWriter returned nil (even after seeding via append mode)")
         return
     end
     local ok, err = TAZC_Core.safeExec(function()

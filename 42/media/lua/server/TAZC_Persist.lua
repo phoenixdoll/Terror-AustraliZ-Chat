@@ -100,10 +100,28 @@ end
 -- through error() turns one log line into ~35 lines of noise. Only genuine
 -- write/close exceptions -- which should be rare -- still go through
 -- safeExec and get the full trace, which is useful there.
+--
+-- getFileWriter(path, true, false) (create-if-missing, truncate) has been
+-- observed live returning nil specifically when `path` doesn't exist on
+-- disk at all yet -- confirmed against this exact function on the real
+-- server after a 2026-08-07 reset wiped every slot file (Notes, Taglines,
+-- Hues, etc.) back to nonexistent; every one failed here identically.
+-- getFileWriter(path, true, true) (append) does not have this problem, so
+-- if the truncating open fails, seed the file into existence with one
+-- append-mode open/close (writes nothing) and retry the truncating open
+-- once against a now-existing file -- the same state every prior
+-- successful write on this server was already in before the reset.
 local function writeAll(fileName, content)
     local writer = getFileWriter(fileName, true, false)
     if not writer then
-        warn("write of '%s' failed: getFileWriter returned nil", fileName)
+        local seedWriter = getFileWriter(fileName, true, true)
+        if seedWriter then
+            seedWriter:close()
+            writer = getFileWriter(fileName, true, false)
+        end
+    end
+    if not writer then
+        warn("write of '%s' failed: getFileWriter returned nil (even after seeding via append mode)", fileName)
         return false
     end
     local ok, err = TAZC_Core.safeExec(function()
