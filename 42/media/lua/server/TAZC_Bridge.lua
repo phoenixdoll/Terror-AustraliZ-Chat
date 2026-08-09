@@ -608,7 +608,14 @@ local function buildStatusPayload()
 
     local payload = {
         writtenAt = os.time(),
-        day = gameTime:getDay(),
+        -- getDay() is 0-indexed too, same as getMonth() below -- inferred
+        -- live 2026-08-08 from an exported day being exactly one behind the
+        -- in-game HUD's date (day 10 exported vs 07/11 shown in-game, which
+        -- fits "July 11" given a default July 9 start + 2 nights survived).
+        -- Not independently confirmed against vanilla source the way
+        -- getMonth() was -- worth re-checking after this deploys if the
+        -- day still looks off.
+        day = gameTime:getDay() + 1,
         -- getMonth() is 0-indexed (confirmed by vanilla season.lua indexing
         -- a 12-entry table with getMonth()+1).
         month = MONTH_NAMES[(gameTime:getMonth() or 0) + 1] or "?",
