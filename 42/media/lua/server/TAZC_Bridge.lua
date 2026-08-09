@@ -600,11 +600,29 @@ local function buildStatusPayload()
     local gameTime = getGameTime()
     local clim = getClimateManager()
 
-    -- getTimeOfDay() returns the fraction of the current day elapsed
-    -- (0..1) -- the same source SFarmingSystem.lua/season.lua use to derive
-    -- the current hour server-side. There's no direct getMinute() on
-    -- GameTime, so minutes are derived from the same fraction.
-    local totalMinutes = math.floor((gameTime:getTimeOfDay() or 0) * 24 * 60)
+    -- STATUS AS OF 2026-08-09: hour/minute were previously both derived as
+    -- math.floor(getTimeOfDay() * 24 * 60) -- confirmed live WRONG (real
+    -- multi-hour drift on a server the user confirmed is running DayLength
+    -- = "real time" (27), so this was never explainable by time-multiplier
+    -- drift as first assumed; it was a genuine bug). getTimeOfDay()'s scale
+    -- apparently isn't simply "fraction of a 24*60-minute day" -- vanilla
+    -- ISReadABook.lua/ISResearchRecipe.lua use a *separate* getMinutesPerDay()
+    -- API specifically to convert a day-fraction into real minutes, which
+    -- this code was never using.
+    --
+    -- Fix: use getHour() directly instead -- it's a plain, confirmed-correct
+    -- direct getter (see vanilla STrapGlobalObject.lua:535, compared
+    -- straightforwardly against animal.minHour/maxHour), not derived math.
+    -- Minute is still derived from getTimeOfDay(), but only for the small,
+    -- less error-prone job of finding position *within* the already-correct
+    -- hour, not the whole day's scale.
+    --
+    -- UNVERIFIED -- same "confirm against a live back-to-back comparison"
+    -- discipline as everything else tonight. If minute is still wrong after
+    -- this deploys, the getTimeOfDay()-based fractional-hour assumption
+    -- below is the next thing to question, not getHour() (that part's solid).
+    local hour = gameTime:getHour()
+    local minute = math.floor((((gameTime:getTimeOfDay() or 0) * 24) - hour) * 60) % 60
 
     local payload = {
         writtenAt = os.time(),
@@ -619,8 +637,8 @@ local function buildStatusPayload()
         -- getMonth() is 0-indexed (confirmed by vanilla season.lua indexing
         -- a 12-entry table with getMonth()+1).
         month = MONTH_NAMES[(gameTime:getMonth() or 0) + 1] or "?",
-        hour = math.floor(totalMinutes / 60) % 24,
-        minute = totalMinutes % 60,
+        hour = hour,
+        minute = minute,
         nightsSurvived = gameTime:getNightsSurvived(),
         season = clim:getSeasonName(),
         current = {
