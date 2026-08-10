@@ -600,29 +600,22 @@ local function buildStatusPayload()
     local gameTime = getGameTime()
     local clim = getClimateManager()
 
-    -- STATUS AS OF 2026-08-09: hour/minute were previously both derived as
-    -- math.floor(getTimeOfDay() * 24 * 60) -- confirmed live WRONG (real
-    -- multi-hour drift on a server the user confirmed is running DayLength
-    -- = "real time" (27), so this was never explainable by time-multiplier
-    -- drift as first assumed; it was a genuine bug). getTimeOfDay()'s scale
-    -- apparently isn't simply "fraction of a 24*60-minute day" -- vanilla
-    -- ISReadABook.lua/ISResearchRecipe.lua use a *separate* getMinutesPerDay()
-    -- API specifically to convert a day-fraction into real minutes, which
-    -- this code was never using.
+    -- ROOT CAUSE FOUND 2026-08-09: getTimeOfDay() is NOT a 0..1 fraction of
+    -- a day -- confirmed against ISZoneDisplay.lua (client/Foraging), which
+    -- assigns self.timeOfDay = gameTime:getTimeOfDay() and then compares it
+    -- directly against `24` and against self.dusk/self.dawn (both plain
+    -- hour values, e.g. "dusk = 20.5"). So getTimeOfDay() already returns
+    -- HOURS on a 0..24 scale, same scale as getHour(). Every previous
+    -- version of this code multiplied by 24 anyway (once, or via the
+    -- now-removed getHour()-anchored version), silently double-scaling it
+    -- -- that's what produced "close but off" results (right hour from the
+    -- separate getHour() call, wrong minute from double-scaled math).
     --
-    -- Fix: use getHour() directly instead -- it's a plain, confirmed-correct
-    -- direct getter (see vanilla STrapGlobalObject.lua:535, compared
-    -- straightforwardly against animal.minHour/maxHour), not derived math.
-    -- Minute is still derived from getTimeOfDay(), but only for the small,
-    -- less error-prone job of finding position *within* the already-correct
-    -- hour, not the whole day's scale.
-    --
-    -- UNVERIFIED -- same "confirm against a live back-to-back comparison"
-    -- discipline as everything else tonight. If minute is still wrong after
-    -- this deploys, the getTimeOfDay()-based fractional-hour assumption
-    -- below is the next thing to question, not getHour() (that part's solid).
+    -- Fix: getHour() for the hour (unchanged, already confirmed correct),
+    -- and minute is just the fractional part of getTimeOfDay() itself * 60
+    -- -- no second multiplication by 24.
     local hour = gameTime:getHour()
-    local minute = math.floor((((gameTime:getTimeOfDay() or 0) * 24) - hour) * 60) % 60
+    local minute = math.floor(((gameTime:getTimeOfDay() or 0) - hour) * 60) % 60
 
     local payload = {
         writtenAt = os.time(),
