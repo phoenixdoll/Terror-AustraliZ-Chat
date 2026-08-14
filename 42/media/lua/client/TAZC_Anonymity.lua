@@ -10,15 +10,19 @@
     - Within recognition range + unmasked -> Real name
     - Within recognition range + masked -> "A Masked Figure"
     - Beyond recognition range -> "Someone"
-    - Mask state unverifiable (data not synced, or an errored check) ->
-      "A Masked Figure" (fails closed, never leaks the real name)
+    - Mask state never once resolved for this player (e.g. they just
+      logged in or just came into view, clothing hasn't synced yet) ->
+      "Someone" -- same as beyond-range, self-heals to the real state
+      (name or masked) the instant real worn-item data lands. NOT shown
+      for an ordinary mid-play hiccup once a player has resolved before --
+      see getMaskState's doc comment for that distinction.
     - Radio, masked speaker -> "A Masked Figure" (mask honoured, same as
       proximity chat; distance is ignored on radio)
     - Radio, unmasked + resolvable -> Real name
     - Radio, speaker unresolvable (cross-cell, no local player object at
-      all -- can't check mask) -> "A Masculine Voice"/"A Feminine Voice"
-      from the server-computed gender flag, or "A Voice on the Radio" if
-      even that didn't arrive
+      all, OR mask state never once resolved) -> "A Masculine Voice"/
+      "A Feminine Voice" from the server-computed gender flag, or "A Voice
+      on the Radio" if even that didn't arrive
 
     Author: Kialae (Mongoose Server)
     License: MIT
@@ -234,21 +238,26 @@ end
     wornItem:getLocation() == ItemBodyLocation.SWEATER_HAT) -- no
     stringification anywhere in the hot path.
 
-    Design decision: anonymity exists so a player can choose to hide their
-    identity, so an unverifiable read must never be the reason a masked
-    player's real name leaks. Every unreliable read below (nil container,
-    unsynced size=0, an errored Java call) fails CLOSED -- reports MASKED --
-    rather than guessing "not masked" and showing the honest name. A read
-    stays uncached (reliable=false) whenever it's not backed by genuine
-    data, so a following call keeps re-checking and self-heals to the true
-    state (masked or not) the moment real data lands.
+    Design decision (changed 2026-08-15): the original fail-closed design
+    here made ordinary clothing-sync hiccups read as "masked" -- surfacing
+    often enough in play (isMasked is polled every frame from TAZC_Bio's
+    nameplate loop) that standing right next to an unmasked player could
+    still show no name until the read happened to resolve. That's a worse
+    everyday experience than the brief leak it guarded against, so an
+    unverifiable read (nil container, unsynced size=0, an errored Java
+    call) now fails OPEN -- reports NOT masked -- rather than hiding a name
+    on a guess. A player is only ever reported masked once real worn-item
+    data actually says so. A read stays uncached (reliable=false) whenever
+    it's not backed by genuine data, so a following call keeps re-checking
+    and self-heals to the true state the moment real data lands -- same
+    self-healing as before, just inverted which state it guesses meanwhile.
 
     @param player IsoPlayer to check
-    @return boolean true if identity is hidden, or the read could not be verified
-    @return boolean true if the read was reliable (false = fail-closed guess, don't cache)
+    @return boolean true if identity is hidden, false if not (or unverifiable)
+    @return boolean true if the read was reliable (false = fail-open guess, don't cache)
 ]]
 function TAZC_Anonymity.checkMaskDirect(player)
-    if not player then return true, false end  -- No player: can't verify, fail closed
+    if not player then return false, false end  -- No player: can't verify, fail open
 
     -- Wrap all Java calls in pcall for safety
     local ok, result, reliable = pcall(function()
@@ -256,7 +265,7 @@ function TAZC_Anonymity.checkMaskDirect(player)
         local wornItems = player:getWornItems()
         dbg("checkMaskDirect: wornItems=%s (type=%s) for %s",
             tostring(wornItems), type(wornItems), tostring(player:getUsername() or "?"))
-        if not wornItems then return true, false end  -- Can't get data: fail closed
+        if not wornItems then return false, false end  -- Can't get data: fail open
 
         -- Resolve the configured slot NAMES (see Config.identityHidingSlots)
         -- against the real ItemBodyLocation global's own fields -- a name
@@ -277,13 +286,13 @@ function TAZC_Anonymity.checkMaskDirect(player)
             tostring(player:getUsername() or "?"))
 
         -- B42: remote players may report size=0 before clothing has synced --
-        -- unverifiable, so fail closed (masked) instead of risking an honest
-        -- name shown over a masked player mid-sync; re-checked every call
-        -- (reliable=false) until real data lands.
+        -- unverifiable, so fail open (not masked) instead of hiding a name
+        -- over a sync gap; re-checked every call (reliable=false) until
+        -- real data lands.
         if size == 0 then
-            dbg("checkMaskDirect: wornItems empty for %s -> unreliable, masking until synced",
+            dbg("checkMaskDirect: wornItems empty for %s -> unreliable, not masking until synced",
                 tostring(player:getUsername() or "?"))
-            return true, false
+            return false, false
         end
 
         for i = 0, size - 1 do
@@ -332,11 +341,59 @@ function TAZC_Anonymity.checkMaskDirect(player)
     end)
 
     if not ok then
-        dbg("checkMaskDirect: error checking player -- failing CLOSED (masked, uncached): %s", tostring(result))
-        return true, false  -- Errored check: fail closed (masked, never leak a real name on a guess)
+        dbg("checkMaskDirect: error checking player -- failing OPEN (not masked, uncached): %s", tostring(result))
+        return false, false  -- Errored check: fail open (don't hide a name on a guess)
     end
 
     return result, reliable
+end
+
+--[[
+    Tri-state mask resolution for a REMOTE player: "masked", "unmasked", or
+    "unknown". This is what tells apart two different kinds of unreliable
+    read that a plain boolean can't distinguish:
+      - Never once resolved for this player (e.g. they just logged in or
+        just came into view and clothing hasn't synced yet) -> "unknown".
+        Caller should show something neutral (getDisplayName renders
+        Config.distantName, "Someone") -- not a guessed real name, and not
+        a guessed mask either.
+      - Was resolved before (a cache entry exists), this read just hiccuped
+        or the 5s cache expired -> keep reporting that last known state.
+        This is what stops an ordinary mid-play hiccup from flickering to
+        "Someone" or flipping mask state every re-check -- only a player
+        who has NEVER once resolved falls through to genuinely "unknown".
+    @param player IsoPlayer (remote) to check
+    @return string "masked" | "unmasked" | "unknown"
+]]
+function TAZC_Anonymity.getMaskState(player)
+    if not player then return "unknown" end
+
+    local ok, onlineID = pcall(function() return player:getOnlineID() end)
+    if not ok or not onlineID then
+        local isMasked, isReliable = TAZC_Anonymity.checkMaskDirect(player)
+        if not isReliable then return "unknown" end
+        return isMasked and "masked" or "unmasked"
+    end
+
+    local cached = TAZC_Anonymity.MaskCache[onlineID]
+    local now = getTimestampMs()
+
+    if cached and (now - cached.timestamp) < TAZC_Anonymity.CACHE_EXPIRY_MS then
+        return cached.isMasked and "masked" or "unmasked"
+    end
+
+    local isMasked, isReliable = TAZC_Anonymity.checkMaskDirect(player)
+
+    if isReliable then
+        TAZC_Anonymity.MaskCache[onlineID] = { isMasked = isMasked, timestamp = now }
+        return isMasked and "masked" or "unmasked"
+    end
+
+    if cached then
+        return cached.isMasked and "masked" or "unmasked"
+    end
+
+    return "unknown"
 end
 
 -- ============================================================================
@@ -440,13 +497,25 @@ function TAZC_Anonymity.getDisplayName(speakerPlayer, speakerUsername, realChara
         return TAZC_Anonymity.Config.distantName, true, true  -- name, isAnonymous, isDistant
     end
     
-    -- Within range but masked = "A Masked Figure"
-    if TAZC_Anonymity.isMasked(speakerPlayer) then
-        dbg("getDisplayName: %s is masked -> '%s'", 
+    -- Within range: resolve mask state. "unknown" (never synced -- e.g.
+    -- just logged in or just came into view) renders as distantName
+    -- ("Someone"), distinct from both a real name and a genuine mask, and
+    -- self-heals to the real state the moment clothing data lands -- see
+    -- getMaskState's doc comment for why this doesn't flicker mid-play.
+    local maskState = TAZC_Anonymity.getMaskState(speakerPlayer)
+
+    if maskState == "masked" then
+        dbg("getDisplayName: %s is masked -> '%s'",
             speakerUsername, TAZC_Anonymity.Config.maskedName)
         return TAZC_Anonymity.Config.maskedName, true, false  -- name, isAnonymous, isDistant
     end
-    
+
+    if maskState == "unknown" then
+        dbg("getDisplayName: %s mask state unresolved (not synced yet) -> '%s'",
+            speakerUsername, TAZC_Anonymity.Config.distantName)
+        return TAZC_Anonymity.Config.distantName, true, true  -- name, isAnonymous, isDistant
+    end
+
     -- Within range and unmasked = real name
     dbg("getDisplayName: %s is recognizable -> '%s'",
         speakerUsername, realCharacterName)
@@ -626,6 +695,29 @@ function TAZC_Anonymity.anonymizeMessageData(msgData, speakerPlayer)
     return isAnonymous
 end
 
+-- Renders msgData as an anonymous voice descriptor (gender-only, from the
+-- server-computed senderIsFemale flag), for the two radio cases where the
+-- speaker can't be safely identified at all: no local player object
+-- (genuinely cross-cell), or mask state not yet resolved. Falls back to
+-- the generic radioName if even senderIsFemale didn't arrive.
+local function renderVoiceDescriptor(msgData, reasonForLog)
+    local voiceName
+    if msgData.senderIsFemale == true then
+        voiceName = TAZC_Anonymity.Config.voiceFeminine
+    elseif msgData.senderIsFemale == false then
+        voiceName = TAZC_Anonymity.Config.voiceMasculine
+    else
+        voiceName = TAZC_Anonymity.Config.radioName
+    end
+    dbg("anonymizeRadioMessageData: %s %s -> '%s'",
+        tostring(msgData.username), reasonForLog, voiceName)
+    msgData.characterName = voiceName
+    msgData.isAnonymous = true
+    msgData.isDistant = true  -- nothing verified about them; hide avatar too
+    msgData.playerColor = TAZC_Anonymity.Config.anonymousColor
+    return true
+end
+
 --[[
     Radio variant of anonymizeMessageData.
 
@@ -649,6 +741,12 @@ end
     about the speaker without a local player object to check. Falls back to
     the generic radioName if even that flag didn't arrive.
 
+    A speakerPlayer that exists but whose mask state is still "unknown"
+    (clothing not synced yet -- e.g. they just logged in) gets the same
+    voice-descriptor treatment as the cross-cell case, for the same reason
+    getDisplayName renders "Someone" rather than a guess: never show a real
+    name OR a mask on an unresolved read.
+
     @param msgData table with username, characterName, senderIsFemale fields
     @param speakerPlayer IsoPlayer who is speaking (nil if not loaded here)
     @return boolean true if the name was anonymised
@@ -661,10 +759,18 @@ function TAZC_Anonymity.anonymizeRadioMessageData(msgData, speakerPlayer)
         return false
     end
 
+    -- Cross-cell: no local player object, so the mask can't be checked at
+    -- all.
+    if not speakerPlayer then
+        return renderVoiceDescriptor(msgData, "unresolved cross-cell")
+    end
+
+    local maskState = TAZC_Anonymity.getMaskState(speakerPlayer)
+
     -- Mask honoured, distance ignored. Same field contract as the proximity
     -- masked branch (name + neutral colour, avatar kept) so a masked radio
     -- line looks identical to a masked proximity line.
-    if speakerPlayer and TAZC_Anonymity.isMasked(speakerPlayer) then
+    if maskState == "masked" then
         dbg("anonymizeRadioMessageData: %s is masked -> '%s'",
             tostring(msgData.username), TAZC_Anonymity.Config.maskedName)
         msgData.characterName = TAZC_Anonymity.Config.maskedName
@@ -674,25 +780,8 @@ function TAZC_Anonymity.anonymizeRadioMessageData(msgData, speakerPlayer)
         return true
     end
 
-    -- Cross-cell: no local player object, so the mask can't be checked at
-    -- all. Render a voice descriptor from the server-computed gender flag
-    -- instead of guessing "unmasked" and showing the real name.
-    if not speakerPlayer then
-        local voiceName
-        if msgData.senderIsFemale == true then
-            voiceName = TAZC_Anonymity.Config.voiceFeminine
-        elseif msgData.senderIsFemale == false then
-            voiceName = TAZC_Anonymity.Config.voiceMasculine
-        else
-            voiceName = TAZC_Anonymity.Config.radioName
-        end
-        dbg("anonymizeRadioMessageData: %s unresolved cross-cell -> '%s'",
-            tostring(msgData.username), voiceName)
-        msgData.characterName = voiceName
-        msgData.isAnonymous = true
-        msgData.isDistant = true  -- nothing verified about them; hide avatar too
-        msgData.playerColor = TAZC_Anonymity.Config.anonymousColor
-        return true
+    if maskState == "unknown" then
+        return renderVoiceDescriptor(msgData, "mask state unresolved (not synced yet)")
     end
 
     -- Resolvable and unmasked: show the real name the server put in

@@ -37,7 +37,7 @@ TAZC_Core.BUILD_DATE = "2026-08-01"
 -- Master debug toggle. Off for releases; on for development sessions only.
 -- When this is true, per-module flags in DEBUG_MODULES are consulted; when
 -- false, all dbg() calls short-circuit at the top of TAZC_Core.debugger.
-TAZC_Core.DEBUG = true
+TAZC_Core.DEBUG = false
 
 -- Per-module debug flags (only checked if DEBUG is true).
 --
