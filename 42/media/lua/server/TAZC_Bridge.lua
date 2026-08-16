@@ -596,6 +596,49 @@ local function forecastToTable(forecast)
     }
 end
 
+-- Same forename+surname logic as TAZC_Server.lua's local getCharacterName --
+-- duplicated rather than required, matching this file's existing pattern of
+-- staying self-contained for anything status/bridge-related (see the
+-- Discord bridge's own header comment on why it was folded in here).
+local function getCharacterName(player)
+    if not player then return "Unknown" end
+
+    local desc = TAZC_Core.safe(function() return player:getDescriptor() end, nil)
+    if desc then
+        local first = TAZC_Core.safe(function() return desc:getForename() or "" end, "")
+        local last = TAZC_Core.safe(function() return desc:getSurname() or "" end, "")
+        local lastClean = last:match("^([^\n]*)") or last
+        local name = (first .. " " .. lastClean):match("^%s*(.-)%s*$")
+        if name and name ~= "" then
+            return name
+        end
+    end
+    return TAZC_Core.safe(function() return player:getUsername() end, "Unknown") or "Unknown"
+end
+
+-- List of {username, characterName} for every currently-online player, for
+-- WhitelistManager's /players Discord command to pair up against its own
+-- live RCON username list. pcall-guarded the same way broadcastToFrequency
+-- above guards getOnlinePlayers() -- unavailable early in boot shouldn't
+-- break the rest of the status export.
+local function buildOnlinePlayersList()
+    local players = {}
+    local ok, onlinePlayers = pcall(function() return getOnlinePlayers() end)
+    if not ok or not onlinePlayers then return players end
+
+    for i = 0, onlinePlayers:size() - 1 do
+        local player = onlinePlayers:get(i)
+        local usernameOk, username = pcall(function() return player:getUsername() end)
+        if usernameOk and username then
+            table.insert(players, {
+                username = username,
+                characterName = getCharacterName(player),
+            })
+        end
+    end
+    return players
+end
+
 local function buildStatusPayload()
     local gameTime = getGameTime()
     local clim = getClimateManager()
@@ -634,6 +677,7 @@ local function buildStatusPayload()
         minute = minute,
         nightsSurvived = gameTime:getNightsSurvived(),
         season = clim:getSeasonName(),
+        players = buildOnlinePlayersList(),
         current = {
             rain = clim:getPrecipitationIntensity(),
             snow = clim:getSnowStrength(),
