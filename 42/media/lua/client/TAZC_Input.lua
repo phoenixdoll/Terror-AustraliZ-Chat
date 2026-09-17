@@ -95,6 +95,7 @@ local PREFIXES = {
     {"/bio ", "bio"},
     {"/tagline ", "bio"},
     {"/name ", "name"},
+    {"/notes ", "notes"},
     {"/roll ", "roll"},
     {"/r ", "roll"},
 }
@@ -341,6 +342,8 @@ local function handleLocalCommand(text)
         local level = localAccessLevel()
         if level and level ~= "none" then
             localSysMsg("  /event <narration> -- narrate an event, heard at double yell range (admin)")
+            localSysMsg("  /notes view <player> -- see every note anyone has written about them (admin)")
+            localSysMsg("  /notes clear <player> -- wipe their note graph, both directions (admin)")
         end
         dbg("handleLocalCommand: printed /tazc help")
         return true
@@ -420,6 +423,31 @@ function TAZC_Input.send(text)
         return
     end
 
+    -- Special handling for /notes admin view|clear <player> -- a moderation
+    -- tool, admin-only. Replaces the old client-triggered NoteClearAbout
+    -- (which any client could fire on itself at any time, not just on a
+    -- genuine fresh character, letting an established character repeatedly
+    -- erase legitimate notes others wrote about it). The server re-checks
+    -- admin status independently -- this local gate is a cosmetic early-out,
+    -- same posture as /event above.
+    if channel == "notes" then
+        if localAccessLevel() == "none" then
+            dbg("send: /notes blocked locally (no staff access)")
+            localSysMsg("/notes admin is a moderation tool -- admins only.")
+            return
+        end
+        local sub, target = message:match("^%s*(%S+)%s+(.-)%s*$")
+        target = target and target ~= "" and target or nil
+        if sub == "view" and target then
+            sendClientCommand("TAZC", "AdminViewNotesAbout", { target = target })
+        elseif sub == "clear" and target then
+            sendClientCommand("TAZC", "AdminClearNotesAbout", { target = target })
+        else
+            localSysMsg("Usage: /notes view <player>  or  /notes clear <player>  (admin only)")
+        end
+        return
+    end
+
     -- Special handling for dice roll command
     -- Rolls dice and sends result to OOC channel
     if channel == "roll" then
@@ -476,13 +504,21 @@ function TAZC_Input.send(text)
     -- a friendly SystemMessage; a client-side early return here would
     -- swallow the message with no feedback at all.
 
-    -- Find all radios that would emit this speech
+    -- Find all radios that would emit this speech. pcall-guarded: a
+    -- radio-subsystem error here must fail the radio branch closed (send
+    -- the message with no emitters), not break ordinary chat entirely --
+    -- previously an unguarded throw inside findPlayerEmitters propagated
+    -- out of send() and the player's message never sent at all.
     local radioEmitters = {}
     local player = getPlayer()
     if player then
         local voiceRange = TAZC_Config.Ranges[channel] or TAZC_Config.Ranges.say
-        local emitters = TAZC_Radio.findPlayerEmitters(player, voiceRange)
-        
+        local ok, emitters = pcall(TAZC_Radio.findPlayerEmitters, player, voiceRange)
+        if not ok then
+            dbg("send: findPlayerEmitters errored, sending with no radio emitters: %s", tostring(emitters))
+            emitters = {}
+        end
+
         -- Serialize emitter data for server
         for _, e in ipairs(emitters) do
             table.insert(radioEmitters, {

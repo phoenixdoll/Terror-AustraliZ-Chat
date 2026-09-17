@@ -158,42 +158,64 @@ end
     Caches result to avoid repeated descriptor access.
 ]]
 local function getCharacterName(player, username)
-    if not player or not username then return nil end
-    
-    -- Check cache first
-    if nameCache[username] then
-        return nameCache[username]
+    if not player or type(username) ~= "string" or username == "" then return nil end
+
+    local desc = safeGet(function() return player:getDescriptor() end, nil)
+    if not desc then
+        nameCache[username] = nil
+        return nil
     end
-    
-    local name = safeGet(function()
-        local desc = player:getDescriptor()
-        if not desc then return nil end
-        
-        local forename = desc:getForename() or ""
-        local surname = desc:getSurname() or ""
-        
-        -- Strip any legacy tagline from surname (in case of old data)
-        if surname:find("\n") then
-            surname = surname:match("^([^\n]*)") or surname
-        end
-        
-        forename = sanitizeString(forename)
-        surname = sanitizeString(surname)
-        
-        if surname == "" then
-            return forename
-        elseif forename == "" then
-            return surname
-        else
-            return forename .. " " .. surname
-        end
-    end, nil)
-    
+
+    -- Re-read both raw fields before accepting the cache and bind the
+    -- entry to {player, descriptor, forename, surname} identity, not just
+    -- the username -- a username is an ACCOUNT identity, not a character
+    -- identity: reusing a username after death (permadeath, a new
+    -- character on the same account) must never return the previous
+    -- character's real name. Also catches an engine-side descriptor
+    -- mutation that happens without replacing either wrapper.
+    local rawForename = safeGet(function() return desc:getForename() end, nil) or ""
+    local rawSurname = safeGet(function() return desc:getSurname() end, nil) or ""
+
+    local cached = nameCache[username]
+    if cached
+        and cached.player == player
+        and cached.descriptor == desc
+        and cached.forename == rawForename
+        and cached.surname == rawSurname
+    then
+        return cached.name
+    end
+
+    -- Strip any legacy tagline from surname (in case of old data)
+    local surnameForBuild = rawSurname
+    if surnameForBuild:find("\n") then
+        surnameForBuild = surnameForBuild:match("^([^\n]*)") or surnameForBuild
+    end
+
+    local forename = sanitizeString(rawForename)
+    local surname = sanitizeString(surnameForBuild)
+
+    local name
+    if surname == "" then
+        name = forename
+    elseif forename == "" then
+        name = surname
+    else
+        name = forename .. " " .. surname
+    end
+
     if name and name ~= "" then
-        nameCache[username] = name
+        nameCache[username] = {
+            player = player,
+            descriptor = desc,
+            forename = rawForename,
+            surname = rawSurname,
+            name = name,
+        }
         return name
     end
-    
+
+    nameCache[username] = nil
     return nil
 end
 
@@ -575,13 +597,20 @@ function TAZC_NameplatePanel:new(player, characterName, tagline)
     
     o.nameHeight = nameHeight
     o.taglineHeight = taglineHeight
-    o.currentAlpha = 1
+    -- Starts unverified/invisible, not visible -- prerender() recomputes
+    -- this every call from real distance/LOS/anonymity checks, but a
+    -- render() that sneaks in before this panel's first prerender pass
+    -- used to draw one frame at full brightness on creation ("assume
+    -- visible" was the wrong default; nothing has actually verified that
+    -- yet). Same reasoning for losVisible below.
+    o.currentAlpha = 0
     o.shouldRemove = false
     o.backgroundColor = {r=0, g=0, b=0, a=0}
     o.borderColor = {r=0, g=0, b=0, a=0}
-    
+
     -- LOS visibility tracking
-    o.losVisible = true              -- Assume visible on creation
+    o.losVisible = false             -- Not visible until the first complete
+                                      -- perception pass actually confirms it
     o.losLastCheck = 0               -- Last LOS check timestamp
     o.losGraceStart = nil            -- When LOS was lost (nil = has LOS)
     o.isOwnPlayer = false            -- Set by showNameplate()
@@ -1059,13 +1088,19 @@ function TAZC_Bio.clearTaglineForFreshCharacter(player)
     end)
     descCache[username] = ""
 
-    -- A new character is a new person: reset this identity's whole note graph
-    -- (my notes about others AND everyone's notes about me). Server keys it to
-    -- the sender, so this only ever resets me.
-    safeExec(function()
-        sendClientCommand("TAZC", "NoteClearAbout", {})
-    end)
-    for k in pairs(noteCache) do noteCache[k] = nil end
+    -- Notes are NOT auto-wiped on a fresh character (changed 2026-09-17):
+    -- this used to fire NoteClearAbout here, client-triggered with no
+    -- server-side verification that the caller was actually a genuine
+    -- fresh character -- a modified client could call it mid-life to erase
+    -- notes other players wrote about it, defeating the point of private
+    -- notes as a moderation/reputation signal. It also conflicted with a
+    -- planned respawn/lives system where a new life is mechanically a new
+    -- character but NOT a new identity (XP and standing carry over), so
+    -- wiping notes here would erase reputation on exactly the respawns
+    -- that system wants treated as continuations. Clearing a target's
+    -- note graph is now an admin-only moderation action -- see
+    -- ServerCommands.AdminClearNotesAbout in TAZC_Server.lua and the
+    -- client-side /notes clear <player> command in TAZC_Input.lua.
 
     dbg("clearTaglineForFreshCharacter: cleared tagline + description + notes for %s", username)
 end
@@ -1288,6 +1323,49 @@ local function onServerCommand(module, command, args)
     elseif command == "NoteAboutCleared" then
         if args.target then
             noteCache[args.target] = nil
+        end
+
+    elseif command == "AdminNotesAboutResult" then
+        -- Reply to /notes view <username> (TAZC_Input.lua's AdminViewNotesAbout
+        -- send, TAZC_Server.lua's admin-gated reply) -- printed as plain chat
+        -- lines rather than a dedicated UI panel; a moderation lookup an
+        -- admin runs occasionally, not a window worth building right now.
+        --
+        -- Deferred require, not a top-level one: TAZC_ChatPanel.lua itself
+        -- requires TAZC_Bio at load time, so a top-level require here would
+        -- be circular. Matches the same in-function require idiom already
+        -- used in TAZC_Input.lua for this exact reason.
+        --
+        -- Uses TAZC_ChatPanel.systemMessage, NOT player:addLineChatElement --
+        -- confirmed live 2026-09-17 that raw addLineChatElement lines never
+        -- actually render once TAZC_ChatPanel has taken over chat display;
+        -- SystemMessage (TAZC_Client.lua's ClientCommands.SystemMessage) is
+        -- the proven, actually-visible path every other piece of local
+        -- feedback in this mod already uses.
+        if args.target then
+            local TAZC_ChatPanel = require("TAZC_ChatPanel")
+            local entries = args.entries or {}
+            safeExec(function()
+                if #entries == 0 then
+                    TAZC_ChatPanel.systemMessage(
+                        "No notes found about '" .. tostring(args.target) .. "'.",
+                        { color = {200, 200, 200} })
+                else
+                    -- One systemMessage call per line -- every other caller of
+                    -- this function sends single-line text; embedding \n in
+                    -- one message and hoping computeMessageLines renders it
+                    -- as separate visual lines is untested and unnecessary
+                    -- when separate calls already do the job reliably.
+                    TAZC_ChatPanel.systemMessage(
+                        "Notes about '" .. tostring(args.target) .. "' (" .. #entries .. "):",
+                        { color = {200, 200, 200} })
+                    for _, entry in ipairs(entries) do
+                        TAZC_ChatPanel.systemMessage(
+                            "  [" .. tostring(entry.author) .. "] " .. tostring(entry.text),
+                            { color = {200, 200, 200} })
+                    end
+                end
+            end)
         end
     end
 end

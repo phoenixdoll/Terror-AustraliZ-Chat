@@ -85,12 +85,25 @@ local M = {
 -- palettes upgrade rather than silently lose features.
 -- =============================================================================
 
+-- Dense array check, not just "ipairs finds only strings": ipairs stops at
+-- the first gap and ignores non-integer keys, so a malformed table like
+-- {[1]="a", [3]="b", extra="junk"} used to sail through as "valid" -- the
+-- fix walks every key/value pair and requires positive-integer keys with
+-- no gaps (maxIndex == count) so an authoring mistake in a palette file is
+-- caught here instead of silently producing bad babble downstream.
 local function isStringList(t)
     if type(t) ~= "table" then return false end
-    for _, v in ipairs(t) do
-        if type(v) ~= "string" then return false end
+    local count = 0
+    local maxIndex = 0
+    for key, value in pairs(t) do
+        if type(key) ~= "number" or key <= 0 or key % 1 ~= 0
+            or type(value) ~= "string" then
+            return false
+        end
+        count = count + 1
+        if key > maxIndex then maxIndex = key end
     end
-    return true
+    return maxIndex == count
 end
 
 -- Validate palette.lex shape (concept-keyed table). Shared by the spoken

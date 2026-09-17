@@ -252,12 +252,14 @@ TAZC_DiscordBridge.POLL_INTERVAL_MS = 3000
 TAZC_DiscordBridge.DISCORD_VOICE_NAME = "A Voice on the Radio"
 
 -- A Discord-origin message has no real in-world position. Treated as if
--- the bridge were a physical radio installation sitting at world origin --
--- lets a ground-placed radio near (0,0,0) pick it up too, same as any
--- other ground radio, rather than only ever reaching carried radios.
-TAZC_DiscordBridge.SOURCE_X = 0
-TAZC_DiscordBridge.SOURCE_Y = 0
-TAZC_DiscordBridge.SOURCE_Z = 0
+-- the bridge were a physical radio installation sitting at the QZ radio
+-- room -- lets a ground-placed radio near there pick it up too, same as
+-- any other ground radio, rather than only ever reaching carried radios.
+-- Deliberately a real, meaningful in-fiction location (not world origin):
+-- anyone who traced a bridged transmission in-game would find this room.
+TAZC_DiscordBridge.SOURCE_X = 12671
+TAZC_DiscordBridge.SOURCE_Y = 6412
+TAZC_DiscordBridge.SOURCE_Z = 1
 TAZC_DiscordBridge.GROUND_RADIO_RANGE = 120
 
 local lastPollMs = 0
@@ -616,11 +618,94 @@ local function getCharacterName(player)
     return TAZC_Core.safe(function() return player:getUsername() end, "Unknown") or "Unknown"
 end
 
--- List of {username, characterName} for every currently-online player, for
--- WhitelistManager's /players Discord command to pair up against its own
--- live RCON username list. pcall-guarded the same way broadcastToFrequency
--- above guards getOnlinePlayers() -- unavailable early in boot shouldn't
--- break the rest of the status export.
+-- Mirrors TAZC_Anonymity.Config's masking rules (that's a CLIENT file --
+-- server Lua can't require it, so the relevant subset is duplicated here).
+-- Without this, exporting real character names to Discord would trivially
+-- defeat the game's own anonymity mechanic for anyone with access to
+-- /players -- a masked player's whole point is that other players can't
+-- identify them, and that has to hold here too. Keep in sync with
+-- TAZC_Anonymity.Config if the masking rules ever change there.
+local MASK_CONFIG = {
+    identityHidingSlots = { "MASK", "FULL_HAT" },
+    alsoHidesIdentity = { "Base.Hat_GasMask" },
+    neverHidesIdentity = {},
+}
+
+local function isInMaskList(itemType, list)
+    for _, entry in ipairs(list) do
+        if entry == itemType then return true end
+    end
+    return false
+end
+
+-- Server-side equivalent of TAZC_Anonymity.checkMaskDirect -- same worn-item
+-- slot/exception logic, minus the client's per-frame cache (this only runs
+-- once per status export cycle, not every frame, so caching buys nothing
+-- here). Deliberately fails CLOSED (treats an unreadable state as masked),
+-- the opposite of the client's fail-open equivalent -- there, a wrong guess
+-- costs one player one momentary display glitch; here, a wrong guess would
+-- broadcast someone's real identity to every Discord member with /players
+-- access, so an unreadable state must hide the name, not reveal it.
+local function isPlayerMasked(player)
+    if not player then return true end
+    if TAZC_Config.liveSandbox("AnonymityEnabled", true) == false then return false end
+
+    local ok, masked = pcall(function()
+        local wornItems = player:getWornItems()
+        if not wornItems then return true end  -- can't verify -- fail closed
+
+        local hidingSlots = {}
+        if ItemBodyLocation then
+            for _, slotName in ipairs(MASK_CONFIG.identityHidingSlots) do
+                local slotObj = ItemBodyLocation[slotName]
+                if slotObj then hidingSlots[slotObj] = true end
+            end
+        end
+
+        for i = 0, wornItems:size() - 1 do
+            local wornItem = wornItems:get(i)
+            if wornItem then
+                local locOk, bodyLocation = pcall(function() return wornItem:getLocation() end)
+                local itemOk, actualItem = pcall(function() return wornItem:getItem() end)
+                bodyLocation = locOk and bodyLocation or nil
+                local itemType = nil
+                if itemOk and actualItem then
+                    local typeOk, iType = pcall(function() return actualItem:getFullType() end)
+                    itemType = typeOk and iType or nil
+                end
+
+                if bodyLocation and hidingSlots[bodyLocation]
+                   and not isInMaskList(itemType, MASK_CONFIG.neverHidesIdentity) then
+                    return true
+                end
+                if isInMaskList(itemType, MASK_CONFIG.alsoHidesIdentity) then
+                    return true
+                end
+            end
+        end
+        return false
+    end)
+
+    if not ok then return true end  -- errored -- fail closed
+    return masked
+end
+
+-- List of {username, characterName} / {username, masked=true} for every
+-- currently-online player, for WhitelistManager's /players Discord command
+-- to pair up against its own live RCON username list.
+--
+-- A masked player's entry carries `masked = true` and NO characterName --
+-- deliberately not even a placeholder like "A Masked Figure" attached to
+-- their username, because pairing a masked-placeholder with a specific
+-- account is itself an identity leak (it tells anyone with /players access
+-- exactly which account is currently in disguise, narrowing them out of the
+-- crowd same as printing the real name would). bot.py drops any username
+-- flagged `masked` from the visible list entirely, folding it into the
+-- headline count instead -- see build_player_status_lookup in bot.py.
+--
+-- pcall-guarded the same way broadcastToFrequency above guards
+-- getOnlinePlayers() -- unavailable early in boot shouldn't break the rest
+-- of the status export.
 local function buildOnlinePlayersList()
     local players = {}
     local ok, onlinePlayers = pcall(function() return getOnlinePlayers() end)
@@ -630,10 +715,11 @@ local function buildOnlinePlayersList()
         local player = onlinePlayers:get(i)
         local usernameOk, username = pcall(function() return player:getUsername() end)
         if usernameOk and username then
-            table.insert(players, {
-                username = username,
-                characterName = getCharacterName(player),
-            })
+            if isPlayerMasked(player) then
+                table.insert(players, { username = username, masked = true })
+            else
+                table.insert(players, { username = username, characterName = getCharacterName(player) })
+            end
         end
     end
     return players

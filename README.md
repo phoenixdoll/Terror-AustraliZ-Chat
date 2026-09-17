@@ -16,6 +16,14 @@ and continues development from there. Full credit for the original design,
 the language-acquisition system, ASL support, and the vast majority of the 
 code in this mod belongs to Kialae: see [LICENSE](LICENSE).
 
+Since the fork point, upstream MongooseChat has also picked up **Luna
+Cheney** as a contributor -- her commits on the upstream project are the
+documentation/build tooling (LDoc/Sphinx API-doc generation, ReadTheDocs
+config), not the mod's Lua feature code. Several bug fixes have since been
+ported into this fork from upstream's continued development; those are
+Kialae's own subsequent work there, not Luna's -- noted here for accuracy
+rather than crediting a specific fix to the wrong person.
+
 This is a straight, mechanically-renamed port as of v0.1.0: every feature
 below carried over from MongooseChat unchanged in behaviour, only the mod's
 identifiers (mod id, sandbox namespace, network channels, file names) were

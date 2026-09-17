@@ -64,19 +64,49 @@ local dbg = TAZC_Core.debugger("LANG")
 -- files. Use the admin commands.)
 -- ============================================================================
 
+-- Resolves an admin-typed target name to (username, forename[, reason]).
+-- An exact account username is checked first as an unambiguous escape
+-- hatch (lets an admin route around two characters sharing a forename by
+-- typing the account username instead); otherwise matches by forename or
+-- full "Forename Surname", case-insensitive. Returns (nil, nil,
+-- "ambiguous") rather than guessing when more than one online character
+-- matches -- fixes a real bug where this used to return on the FIRST
+-- match, silently mutating whichever character the roster iteration
+-- happened to visit first while telling the admin it affected the one
+-- they meant.
 local function resolveTargetByName(targetName)
     if not targetName or targetName == "" then return nil, nil end
+    local records = TAZC_Lang._onlinePlayerRecords()
+
+    local usernameMatches = {}
+    for _, rec in ipairs(records) do
+        if rec.username == targetName then
+            usernameMatches[#usernameMatches + 1] = rec
+        end
+    end
+    if #usernameMatches == 1 then
+        return usernameMatches[1].username, usernameMatches[1].forename
+    elseif #usernameMatches > 1 then
+        return nil, nil, "ambiguous"
+    end
+
     local needle = targetName:lower()
-    for _, rec in ipairs(TAZC_Lang._onlinePlayerRecords()) do
+    local matches = {}
+    for _, rec in ipairs(records) do
         if rec.forename then
             local matched = rec.forename:lower() == needle
             if not matched and rec.surname and rec.surname ~= "" then
                 matched = (rec.forename .. " " .. rec.surname):lower() == needle
             end
             if matched then
-                return rec.username, rec.forename
+                matches[#matches + 1] = rec
             end
         end
+    end
+    if #matches == 1 then
+        return matches[1].username, matches[1].forename
+    elseif #matches > 1 then
+        return nil, nil, "ambiguous"
     end
     return nil, nil
 end
@@ -100,6 +130,18 @@ local function sysMsgGreen(player, msg)
     sendServerCommand(player, "TAZC", "SystemMessage", {
         message = msg, color = {100, 255, 100}
     })
+end
+
+-- Shared error reply for every resolveTargetByName call site below --
+-- distinguishes "nobody matches" from "more than one online character
+-- matches" so an admin isn't told a wrong-guess success message.
+local function sysMsgTargetNotResolved(player, target, reason)
+    if reason == "ambiguous" then
+        sysMsgRed(player, "Multiple online characters match '" .. target ..
+            "' -- use their exact account username instead.")
+    else
+        sysMsgRed(player, "No online character named '" .. target .. "'.")
+    end
 end
 
 -- E4 ergonomics (2026-07-08): "name" or "name (prefix)" for one language --
@@ -225,9 +267,9 @@ function TAZC_LangCommands.handleGrantCommand(player, argString)
         return
     end
 
-    local resolvedUsername = resolveTargetByName(target)
+    local resolvedUsername, _, reason = resolveTargetByName(target)
     if not resolvedUsername then
-        sysMsgRed(player, "No online character named '" .. target .. "'.")
+        sysMsgTargetNotResolved(player, target, reason)
         return
     end
 
@@ -283,9 +325,9 @@ function TAZC_LangCommands.handleRevokeCommand(player, argString)
         return
     end
 
-    local resolvedUsername = resolveTargetByName(target)
+    local resolvedUsername, _, reason = resolveTargetByName(target)
     if not resolvedUsername then
-        sysMsgRed(player, "No online character named '" .. target .. "'.")
+        sysMsgTargetNotResolved(player, target, reason)
         return
     end
 
@@ -332,9 +374,9 @@ function TAZC_LangCommands.handleResetCommand(player, argString)
         return
     end
 
-    local resolvedUsername, resolvedForename = resolveTargetByName(target)
+    local resolvedUsername, resolvedForename, reason = resolveTargetByName(target)
     if not resolvedUsername then
-        sysMsgRed(player, "No online character named '" .. target .. "'.")
+        sysMsgTargetNotResolved(player, target, reason)
         return
     end
 
@@ -418,9 +460,9 @@ function TAZC_LangCommands.handlePruneCommand(player, argString)
         return
     end
 
-    local resolvedUsername, resolvedForename = resolveTargetByName(target)
+    local resolvedUsername, resolvedForename, reason = resolveTargetByName(target)
     if not resolvedUsername then
-        sysMsgRed(player, "No online character named '" .. target .. "'.")
+        sysMsgTargetNotResolved(player, target, reason)
         return
     end
 
@@ -901,9 +943,9 @@ function TAZC_LangCommands.handleSetCommand(player, argString)
             sysMsgRed(player, "Only admins can assign speaking languages to other characters.")
             return
         end
-        local resolvedUsername, resolvedForename = resolveTargetByName(target)
+        local resolvedUsername, resolvedForename, reason = resolveTargetByName(target)
         if not resolvedUsername then
-            sysMsgRed(player, "No online character named '" .. target .. "'.")
+            sysMsgTargetNotResolved(player, target, reason)
             return
         end
         targetUsername = resolvedUsername

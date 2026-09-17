@@ -26,7 +26,7 @@ local TAZC_Core = {}
 --   - CHANGELOG.md (close [Unreleased] and tag with the new version)
 -- ============================================================================
 
-TAZC_Core.VERSION = "0.1.1.0"
+TAZC_Core.VERSION = "0.1.2.0"
 TAZC_Core.VERSION_NAME = "Bridge"
 TAZC_Core.BUILD_DATE = "2026-08-01"
 
@@ -37,7 +37,7 @@ TAZC_Core.BUILD_DATE = "2026-08-01"
 -- Master debug toggle. Off for releases; on for development sessions only.
 -- When this is true, per-module flags in DEBUG_MODULES are consulted; when
 -- false, all dbg() calls short-circuit at the top of TAZC_Core.debugger.
-TAZC_Core.DEBUG = false
+TAZC_Core.DEBUG = true
 
 -- Per-module debug flags (only checked if DEBUG is true).
 --

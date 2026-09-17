@@ -13,7 +13,7 @@
 
     THE SCHEME
     ----------
-    Two slot files per store: <name>_a.json and <name>_b.json. Writes
+    Two slot files per store: <name>_a.txt and <name>_b.txt. Writes
     alternate between them, each wrapped in an envelope carrying a
     monotonically increasing generation counter:
 
@@ -30,11 +30,27 @@
     failure the slot pointer does not advance, so the next flush retries
     over the same bad slot and the good slot is never touched.
 
+    WHY .txt AND NOT .json (fixed 2026-09-17)
+    ------------------------------------------
+    Slots were originally named <name>_a.json/_b.json. B42.20 only permits
+    Lua writers to create ini/cfg/txt/log files -- getFileWriter silently
+    returned nil for every .json write, every session, for every store on
+    this layer (Notes, Taglines, Hues, Acquisitions, language data, ...).
+    Renamed the writable slots to .txt (content is still JSON, only the
+    extension changed) to match the actual write policy. The old .json
+    slots are kept as a read-only migration source (see LEGACY MIGRATION)
+    since they were never successfully written to begin with, but a
+    manually-seeded or future-restored one should still be picked up.
+
     LEGACY MIGRATION
     ----------------
-    Stores created before this layer used a single <legacyFile>. If
-    neither slot exists, the loader falls back to it. The legacy file is
-    never written again -- it survives intact as a pre-migration snapshot.
+    Two layers, checked in order, both read-only (never written again once
+    a store is on the .txt slots above):
+      1. The old .json-named A/B slots from before the extension fix --
+         same generation-envelope format, just the wrong extension.
+      2. Stores created even earlier than the A/B layer used a single
+         <legacyFile>. If nothing is found in either A/B scheme, the
+         loader falls back to it.
 
     CORRUPTION POLICY
     -----------------
@@ -101,37 +117,18 @@ end
 -- write/close exceptions -- which should be rare -- still go through
 -- safeExec and get the full trace, which is useful there.
 --
--- STATUS AS OF 2026-08-07 -- the seed-then-retry below is UNVERIFIED and
--- likely does not actually work. getFileWriter(path, true, false) (create,
--- truncate) was observed live returning nil for every slot file here
--- (Notes, Taglines, Hues, etc.) after a server reset wiped them to
--- nonexistent -- but there's no real evidence any of them ever saved
--- successfully in the first place; this mod is under a week old, and "no
--- save data found; starting fresh" at boot doesn't prove prior success.
--- Don't assume that.
---
--- The seed-then-retry pattern below (open once in append mode to force
--- creation, then retry the truncating open) was written on the theory that
--- append mode doesn't share truncate mode's problem. That theory was
--- directly disproven the same night for TAZC_Bridge.lua's near-identical
--- status.json write: pure append mode, even against a freshly-deleted
--- nonexistent file, still failed to create it. This code was never
--- reverted/redesigned to match that finding -- next session should start
--- there instead of trusting this comment or this function's success.
--- Current leading theory (also untested against this function): the
--- target's file EXTENSION matters -- every `.json` write failed, every
--- `.txt` write (outbox.txt/inbox.txt) succeeded, all night, no exceptions.
+-- RESOLVED 2026-09-17: root cause was the target file's EXTENSION, not
+-- create-vs-append mode. B42.20 only permits Lua writers to create
+-- ini/cfg/txt/log files -- every `.json` write here returned a nil writer,
+-- every `.txt` write (outbox.txt/inbox.txt, same server) succeeded. The
+-- seed-then-retry workaround this function used to carry (open once in
+-- append mode to force creation, then retry the truncating open) was built
+-- on a since-disproven theory and is no longer needed now that Store's
+-- slot files are named `.txt` -- see TAZC_Persist.open below.
 local function writeAll(fileName, content)
     local writer = getFileWriter(fileName, true, false)
     if not writer then
-        local seedWriter = getFileWriter(fileName, true, true)
-        if seedWriter then
-            seedWriter:close()
-            writer = getFileWriter(fileName, true, false)
-        end
-    end
-    if not writer then
-        warn("write of '%s' failed: getFileWriter returned nil (even after seeding via append mode)", fileName)
+        warn("write of '%s' failed: getFileWriter returned nil", fileName)
         return false
     end
     local ok, err = TAZC_Core.safeExec(function()
@@ -198,7 +195,11 @@ function TAZC_Persist.open(spec)
         "TAZC_Persist.open: spec.name (string) is required")
     local self = setmetatable({}, Store)
     self.name      = spec.name
-    self.slotFiles = { a = spec.name .. "_a.json", b = spec.name .. "_b.json" }
+    self.slotFiles = { a = spec.name .. "_a.txt", b = spec.name .. "_b.txt" }
+    -- Old .json-named A/B slots, read-only migration source -- see the
+    -- "WHY .txt AND NOT .json" note at the top of this file. Derived
+    -- automatically from spec.name; callers don't need to pass anything.
+    self.legacyABFiles = { a = spec.name .. "_a.json", b = spec.name .. "_b.json" }
     self.legacy    = spec.legacyFile
     self.validate  = spec.validate
     self.lastGen   = 0        -- highest generation known good
@@ -284,7 +285,41 @@ function Store:load()
             self.name, self.slotFiles.b)
     end
 
-    -- Legacy fallback: pre-A/B single file. Two flavours:
+    -- Legacy fallback, layer 1: the old .json-named A/B slots (before the
+    -- .txt extension fix). Same generation-envelope format and winner-
+    -- picking logic as the .txt slots above, just a different pair of
+    -- filenames. Read-only -- never written again once this store is on
+    -- the .txt slots. Checked before the single-legacy-file fallback below
+    -- since it's a richer migration source (full A/B generation history,
+    -- not just one snapshot).
+    do
+        local legacyABRaw = {
+            a = readAll(self.legacyABFiles.a),
+            b = readAll(self.legacyABFiles.b),
+        }
+        local legacyABEnv = {}
+        for slot, text in pairs(legacyABRaw) do
+            legacyABEnv[slot] = decodeEnvelope(text, self.validate)
+        end
+        local legacyABWinner = nil
+        if legacyABEnv.a and legacyABEnv.b then
+            legacyABWinner = (legacyABEnv.b.gen > legacyABEnv.a.gen) and "b" or "a"
+        elseif legacyABEnv.a then
+            legacyABWinner = "a"
+        elseif legacyABEnv.b then
+            legacyABWinner = "b"
+        end
+        if legacyABWinner then
+            dbg("store '%s': migrating from legacy .json slot %s ('%s') to .txt slots",
+                self.name, legacyABWinner:upper(), self.legacyABFiles[legacyABWinner])
+            -- lastGen/nextSlot stay at their defaults (0 / "a") -- the .txt
+            -- slots are a fresh generation sequence, decoupled from the old
+            -- .json slot's numbering.
+            return legacyABEnv[legacyABWinner].data, "legacy-json-" .. legacyABWinner
+        end
+    end
+
+    -- Legacy fallback, layer 2: pre-A/B single file. Two flavours:
     --   - clean first boot after upgrading (no slots at all)  -> "legacy"
     --   - disaster recovery (slots existed but both corrupt)  -> "legacy-recovery"
     if self.legacy then

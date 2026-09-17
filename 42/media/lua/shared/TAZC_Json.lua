@@ -285,7 +285,16 @@ local function decodeImpl(str)
         parseError("unexpected character '" .. c .. "'", pos)
     end
 
-    return parseValue()
+    local result = parseValue()
+    -- Reject trailing content instead of silently ignoring it: a
+    -- truncated-then-appended or partially-corrupted persistence file
+    -- (extra bytes after a valid JSON value) should decode as corrupt,
+    -- not as "the leading valid portion, whatever came after is fine."
+    skipWS()
+    if pos <= n then
+        parseError("trailing content after JSON value", pos)
+    end
+    return result
 end
 
 function M.decode(jsonStr)

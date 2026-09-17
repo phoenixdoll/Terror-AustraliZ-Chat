@@ -211,9 +211,131 @@ end
 -- MASK DETECTION
 -- ============================================================================
 
+-- Read the appearance B42 actually replicates and renders for remote
+-- players. Unlike getWornItems(), this collection stays authoritative on
+-- multiplayer clients in 42.20 -- it's what let a bare-faced remote player
+-- (WornItems still empty because clothing hadn't synced yet) be told apart
+-- from a genuinely masked one, which the old single-path WornItems scan
+-- below could never distinguish and is the real fix for the 2026-08-15
+-- fail-open workaround documented on checkMaskDirect.
+--
+-- VERIFICATION NOTE: ItemVisuals/ItemTag.IS_DISGUISE/IS_LOWER_DISGUISE/
+-- IS_UPPER_DISGUISE are ported from upstream MongooseChat and NOT
+-- independently re-verified against this project's shipped jar (no
+-- jar/javap decompiling tooling was available in this environment to
+-- cross-check them the way CharacterTrait.DEAF was). Every field is
+-- existence-checked before use and the whole thing is pcall-guarded, so a
+-- wrong assumption here degrades to "unreliable" and falls through to
+-- checkNativeDisguise, then the WornItems fallback -- it cannot make mask
+-- detection less safe than before, only less effective if these specific
+-- fields turn out not to exist. Confirm live before fully trusting it.
+local function checkReplicatedDisguise(player)
+    local ok, result, reliable, reason = pcall(function()
+        if not ItemVisuals then
+            return nil, false, "item_visuals_class_unavailable"
+        end
+        if not ItemTag
+           or not ItemTag.IS_DISGUISE
+           or not ItemTag.IS_LOWER_DISGUISE
+           or not ItemTag.IS_UPPER_DISGUISE then
+            return nil, false, "disguise_tags_unavailable"
+        end
+        if not ItemBodyLocation or not ItemBodyLocation.MASK then
+            return nil, false, "mask_location_unavailable"
+        end
+
+        local visuals = ItemVisuals.new()
+        if not visuals then
+            return nil, false, "item_visuals_create_failed"
+        end
+        player:getItemVisuals(visuals)
+
+        local size = visuals:size()
+        if type(size) ~= "number" or size < 0 or size ~= math.floor(size) then
+            return nil, false, "item_visuals_size_unavailable"
+        end
+
+        local hasLowerDisguise = false
+        local hasUpperDisguise = false
+
+        for i = 0, size - 1 do
+            local visual = visuals:get(i)
+            if visual then
+                -- Vanilla's own calculation ignores visuals whose script item
+                -- cannot be resolved (e.g. while a removed mod item is being
+                -- discarded), so mirror that behaviour here.
+                local scriptItem = visual:getScriptItem()
+                if scriptItem then
+                    local itemType = nil
+                    local typeOk, fullName = pcall(function() return scriptItem:getFullName() end)
+                    if typeOk and type(fullName) == "string" and fullName ~= "" then
+                        itemType = fullName
+                    else
+                        local visualTypeOk, visualType = pcall(function() return visual:getItemType() end)
+                        if visualTypeOk and type(visualType) == "string" and visualType ~= "" then
+                            itemType = visualType
+                        end
+                    end
+
+                    local excluded = itemType
+                        and isInList(itemType, TAZC_Anonymity.Config.neverHidesIdentity)
+                    if not excluded then
+                        local location = scriptItem:getBodyLocation()
+                        if location == ItemBodyLocation.MASK then
+                            return true, true
+                        end
+                        if itemType
+                           and isInList(itemType, TAZC_Anonymity.Config.alsoHidesIdentity) then
+                            return true, true
+                        end
+                        if scriptItem:hasTag(ItemTag.IS_DISGUISE) then
+                            return true, true
+                        end
+                        if scriptItem:hasTag(ItemTag.IS_LOWER_DISGUISE) then
+                            hasLowerDisguise = true
+                        end
+                        if scriptItem:hasTag(ItemTag.IS_UPPER_DISGUISE) then
+                            hasUpperDisguise = true
+                        end
+                    end
+                end
+            end
+        end
+
+        return hasLowerDisguise and hasUpperDisguise, true
+    end)
+
+    if not ok then
+        return nil, false, "item_visuals_read_failed"
+    end
+    return result, reliable, reason
+end
+
+-- 42.20 exposes this public boolean directly to Lua per upstream -- a cheap,
+-- reliable fallback if replicated ItemVisuals can't be inspected. Same
+-- verification caveat as checkReplicatedDisguise above: not independently
+-- confirmed against this project's jar, pcall-guarded so an unavailable/
+-- wrong-shaped method just falls through to the WornItems compatibility path.
+local function checkNativeDisguise(player)
+    local ok, result = pcall(function() return player:isDisguised() end)
+    if ok and type(result) == "boolean" then
+        return result, true
+    end
+    return nil, false
+end
+
 --[[
     Direct check if a player is wearing something that hides their identity.
     Called by the caching wrapper isMasked() - do not call directly.
+
+    Priority order: replicated ItemVisuals (checkReplicatedDisguise, the
+    appearance actually rendered for remote players) first, then the native
+    isDisguised boolean (checkNativeDisguise), then the historical WornItems
+    scan below purely as a last-resort compatibility fallback if neither
+    modern API is available/reliable. The WornItems scan's own fail-open
+    design (see its "Design decision" note below) stays exactly as it was --
+    it's now just a fallback tier instead of the only signal, since the two
+    checks above resolve most reads with real data instead of a guess.
 
     B42: iterates WornItems by index (avoids the unstable BodyLocations
     global); each entry's getLocation() gives the slot, getItem() the item.
@@ -258,6 +380,23 @@ end
 ]]
 function TAZC_Anonymity.checkMaskDirect(player)
     if not player then return false, false end  -- No player: can't verify, fail open
+
+    local visualResult, visualReliable = checkReplicatedDisguise(player)
+    if visualReliable == true and type(visualResult) == "boolean" then
+        dbg("checkMaskDirect: replicated appearance for %s -> masked=%s",
+            tostring(player:getUsername() or "?"), tostring(visualResult))
+        return visualResult, true
+    end
+
+    local nativeResult, nativeReliable = checkNativeDisguise(player)
+    if nativeReliable == true and type(nativeResult) == "boolean" then
+        dbg("checkMaskDirect: native disguise state for %s -> masked=%s",
+            tostring(player:getUsername() or "?"), tostring(nativeResult))
+        return nativeResult, true
+    end
+
+    dbg("checkMaskDirect: modern appearance APIs unavailable for %s; using legacy WornItems",
+        tostring(player:getUsername() or "?"))
 
     -- Wrap all Java calls in pcall for safety
     local ok, result, reliable = pcall(function()

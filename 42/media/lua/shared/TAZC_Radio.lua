@@ -496,10 +496,17 @@ end
     @param player IsoPlayer
     @return Array of radioState tables (empty if none found)
 ]]
+-- Recursion/scan caps for scanContainer below -- a pathological container
+-- graph (deeply nested bags, an absurd number of them) must degrade to
+-- "stop looking," never hang or stack-overflow the scan.
+local MAX_NESTED_CONTAINER_DEPTH = 8
+local MAX_SCANNED_CONTAINERS = 64
+local MAX_SCANNED_ITEMS = 2048
+
 function TAZC_Radio.getAllPlayerRadios(player)
     local radios = {}
     if not player then return radios end
-    
+
     local username = TAZC_Core.safe(function() return player:getUsername() end, nil)
     local pos = TAZC_Core.safe(function()
         return {
@@ -508,46 +515,75 @@ function TAZC_Radio.getAllPlayerRadios(player)
             z = player:getZ()
         }
     end, nil)
-    
-    -- Track seen items by identity to dedupe. In PZ the same InventoryItem
-    -- reference is returned across queries; Lua table-as-set with the
-    -- userdata as key works for dedup.
+
+    -- Track seen items/containers by identity to dedupe. In PZ the same
+    -- InventoryItem reference is returned across queries; Lua table-as-set
+    -- with the userdata as key works for dedup, and doubles here as cycle
+    -- protection for scanContainer's recursion.
     local seen = {}
-    
-    local function addIfRadio(item)
+    local seenContainers = {}
+    local scannedContainerCount = 0
+    local scannedItemCount = 0
+    local inspectItem, scanContainer
+
+    -- Recurses into a carried bag's own inventory so a radio remains
+    -- eligible regardless of which carried container owns it (previously
+    -- only top-level hand/belt/inventory slots were scanned -- a radio in
+    -- a bag-within-a-bag was invisible to this whole subsystem, including
+    -- the Discord bridge's outbound emitter discovery).
+    scanContainer = function(container, depth)
+        if not container or seenContainers[container] then return end
+        if depth > MAX_NESTED_CONTAINER_DEPTH then return end
+        if scannedContainerCount >= MAX_SCANNED_CONTAINERS then return end
+        seenContainers[container] = true
+        scannedContainerCount = scannedContainerCount + 1
+
+        local items = TAZC_Core.safe(function() return container:getItems() end, nil)
+        if not items then return end
+        local size = TAZC_Core.safe(function() return items:size() end, 0)
+        if size > (MAX_SCANNED_ITEMS - scannedItemCount) then return end
+        for i = 0, size - 1 do
+            scannedItemCount = scannedItemCount + 1
+            inspectItem(TAZC_Core.safe(function() return items:get(i) end, nil), depth)
+        end
+    end
+
+    inspectItem = function(item, depth)
         if not item or seen[item] then return end
         seen[item] = true
         local state = tryGetRadioState(item, TAZC_Radio.SOURCE_PLAYER, pos, username)
         if state then
             table.insert(radios, state)
         end
+
+        -- InventoryItem's B42 type predicate distinguishes containers; only
+        -- an InventoryContainer then exposes a nested ItemContainer.
+        local isContainer = TAZC_Core.safe(function() return item:IsInventoryContainer() end, false)
+        if isContainer then
+            local nested = TAZC_Core.safe(function() return item:getInventory() end, nil)
+            if nested then scanContainer(nested, depth + 1) end
+        end
     end
-    
+
     -- Hands
-    addIfRadio(TAZC_Core.safe(function() return player:getPrimaryHandItem() end, nil))
-    addIfRadio(TAZC_Core.safe(function() return player:getSecondaryHandItem() end, nil))
-    
+    inspectItem(TAZC_Core.safe(function() return player:getPrimaryHandItem() end, nil), 0)
+    inspectItem(TAZC_Core.safe(function() return player:getSecondaryHandItem() end, nil), 0)
+
     -- Attached items (belt etc.)
     local attached = TAZC_Core.safe(function() return player:getAttachedItems() end, nil)
     if attached then
         local size = TAZC_Core.safe(function() return attached:size() end, 0)
         for i = 0, size - 1 do
-            addIfRadio(TAZC_Core.safe(function() return attached:getItemByIndex(i) end, nil))
+            inspectItem(TAZC_Core.safe(function() return attached:getItemByIndex(i) end, nil), 0)
         end
     end
-    
-    -- Full inventory
+
+    -- Full inventory (recurses into any carried bags)
     local inventory = TAZC_Core.safe(function() return player:getInventory() end, nil)
     if inventory then
-        local items = TAZC_Core.safe(function() return inventory:getItems() end, nil)
-        if items then
-            local size = TAZC_Core.safe(function() return items:size() end, 0)
-            for i = 0, size - 1 do
-                addIfRadio(TAZC_Core.safe(function() return items:get(i) end, nil))
-            end
-        end
+        scanContainer(inventory, 0)
     end
-    
+
     dbg("getAllPlayerRadios: found %d radios on %s", #radios, tostring(username or "?"))
     return radios
 end
@@ -565,72 +601,78 @@ end
 ]]
 function TAZC_Radio.getGroundRadios(centerX, centerY, centerZ, range)
     local radios = {}
-    local foundPositions = {}  -- Track positions to avoid duplicates
-    
+    -- A square may hold several distinct radio objects/items. Position-
+    -- based dedupe let the first (possibly muted) device on a tile mask
+    -- every OTHER radio sharing that tile. Track physical engine
+    -- identities instead, so a second radio on the same square is no
+    -- longer silently dropped.
+    local seenRadios = {}
+
     local cell = TAZC_Core.safe(function() return getWorld():getCell() end, nil)
     if not cell then return radios end
-    
+
+    -- A world item can be exposed both as a raw square object and as a
+    -- world-item wrapper around an InventoryItem (entity:getItem()).
+    -- Normalize to the InventoryItem where one exists so the two engine
+    -- views of the same physical radio count as one identity, while a
+    -- fixed square object (no .getItem method -- an appliance/base-
+    -- station device) is used as-is.
+    local function normalizeGroundEntity(entity)
+        if not entity then return nil end
+        if not entity.getItem then return entity end
+        return TAZC_Core.safe(function() return entity:getItem() end, nil)
+    end
+
+    local function inspectGroundEntity(entity, pos)
+        if not entity or seenRadios[entity] then return end
+        local candidate = normalizeGroundEntity(entity)
+        if not candidate then
+            seenRadios[entity] = true
+            return
+        end
+        if candidate ~= entity and seenRadios[candidate] then
+            seenRadios[entity] = true
+            return
+        end
+        seenRadios[entity] = true
+        seenRadios[candidate] = true
+
+        local state = tryGetRadioState(candidate, TAZC_Radio.SOURCE_GROUND, pos, nil)
+        if state then table.insert(radios, state) end
+    end
+
     -- Iterate squares in range
     for dx = -range, range do
         for dy = -range, range do
             local x, y, z = centerX + dx, centerY + dy, centerZ
-            local posKey = x .. "_" .. y .. "_" .. z
-            
             local square = TAZC_Core.safe(function() return cell:getGridSquare(x, y, z) end, nil)
-            
+
             if square then
-                -- Check objects on this square (furniture, appliances)
+                local pos = {x = x, y = y, z = z}
+
+                -- Objects on this square (furniture, appliances)
                 local objects = TAZC_Core.safe(function() return square:getObjects() end, nil)
-                
                 if objects then
                     local size = TAZC_Core.safe(function() return objects:size() end, 0)
-                    
                     for i = 0, size - 1 do
-                        local obj = TAZC_Core.safe(function() return objects:get(i) end, nil)
-                        
-                        -- Only try getDeviceData if method exists
-                        if obj and obj.getDeviceData and not foundPositions[posKey] then
-                            local deviceData = TAZC_Core.safe(function() return obj:getDeviceData() end, nil)
-                            
-                            if deviceData then
-                                local pos = {x = x, y = y, z = z}
-                                local state = buildRadioState(deviceData, TAZC_Radio.SOURCE_GROUND, pos, nil)
-                                if state then
-                                    table.insert(radios, state)
-                                    foundPositions[posKey] = true
-                                end
-                            end
-                        end
+                        inspectGroundEntity(
+                            TAZC_Core.safe(function() return objects:get(i) end, nil), pos)
                     end
                 end
-                
+
                 -- Also check world items (dropped radios)
-                if not foundPositions[posKey] then
-                    local worldItems = TAZC_Core.safe(function() return square:getWorldObjects() end, nil)
-                    
-                    if worldItems then
-                        local size = TAZC_Core.safe(function() return worldItems:size() end, 0)
-                        
-                        for i = 0, size - 1 do
-                            local worldItem = TAZC_Core.safe(function() return worldItems:get(i) end, nil)
-                            
-                            if worldItem and not foundPositions[posKey] then
-                                local item = TAZC_Core.safe(function() return worldItem:getItem() end, nil)
-                                
-                                local pos = {x = x, y = y, z = z}
-                                local state = tryGetRadioState(item, TAZC_Radio.SOURCE_GROUND, pos, nil)
-                                if state then
-                                    table.insert(radios, state)
-                                    foundPositions[posKey] = true
-                                end
-                            end
-                        end
+                local worldItems = TAZC_Core.safe(function() return square:getWorldObjects() end, nil)
+                if worldItems then
+                    local size = TAZC_Core.safe(function() return worldItems:size() end, 0)
+                    for i = 0, size - 1 do
+                        inspectGroundEntity(
+                            TAZC_Core.safe(function() return worldItems:get(i) end, nil), pos)
                     end
                 end
             end
         end
     end
-    
+
     return radios
 end
 

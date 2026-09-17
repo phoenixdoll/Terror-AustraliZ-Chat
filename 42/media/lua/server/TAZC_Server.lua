@@ -789,30 +789,67 @@ end
 -- LOGGING
 -- ============================================================================
 
+-- Escapes a value for safe embedding inside a JSON string literal. Every
+-- field interpolated into a JSON-format log line must go through this, not
+-- just the message text -- a character name containing a bare `"` or a
+-- newline (reachable via /name, or ordinary character creation, which
+-- isn't sanitized by /name's own filter at all) otherwise corrupts the
+-- line for any tooling that parses these logs as JSON (the Discord bridge
+-- included). Any control character not covered by the explicit escapes
+-- becomes a \u00XX sequence so the output stays valid JSON regardless of
+-- what a player's name/message contains.
+local function jsonEscapeField(value)
+    local text = tostring(value or "")
+    text = text:gsub('\\', '\\\\')
+    text = text:gsub('"', '\\"')
+    text = text:gsub('\n', '\\n')
+    text = text:gsub('\r', '\\r')
+    text = text:gsub('\t', '\\t')
+    text = text:gsub('%c', function(c) return string.format('\\u%04x', c:byte()) end)
+    return text
+end
+
+-- Strips control characters from a plain-text (non-JSON) log field. Not a
+-- JSON-escaping concern here, but a name/message containing a raw newline
+-- could still forge what looks like an extra log line, so every
+-- interpolated field gets this, matching the practice logRadioRelay below
+-- already used for its own message fields.
+local function plainLogField(value)
+    return tostring(value or ""):gsub('[%c]', '')
+end
+
+-- The server name becomes a path COMPONENT (TAZC_Config.Log.path ..
+-- serverName .. "/..."), so it has to be validated, not just escaped --
+-- a server name containing "..", "/", "\\", or ":" could otherwise escape
+-- the intended log directory or break the path outright. Falls back to
+-- "unknown" (a valid, already-used directory name in this file) rather
+-- than trying to sanitize/rewrite an unsafe name.
+local function safeServerNameForPath(name)
+    local text = tostring(name or "")
+    if text == "" or text:find("%.%.", 1, true) or text:find("[/\\:]") then
+        return "unknown"
+    end
+    return text
+end
+
 local function logMessage(msgData)
     if not TAZC_Config.Log.enabled then return end
-    
-    local serverName = TAZC_Core.safe(function() return getServerName() end, "unknown") or "unknown"
+
+    local serverName = safeServerNameForPath(
+        TAZC_Core.safe(function() return getServerName() end, "unknown"))
     local date = os.date("%Y-%m-%d")
     local logPath = TAZC_Config.Log.path .. serverName .. "/chat-" .. date .. ".log"
-    
+
     local logLine
     if TAZC_Config.Log.jsonFormat then
-        local escapedMsg = msgData.message
-            :gsub('\\', '\\\\')
-            :gsub('"', '\\"')
-            :gsub('\n', '\\n')
-            :gsub('\r', '\\r')
-            :gsub('\t', '\\t')
-        
         logLine = string.format(
             '{"ts":%d,"ch":"%s","steam":"%s","user":"%s","char":"%s","msg":"%s","x":%.1f,"y":%.1f,"z":%.1f}',
             msgData.timestamp,
-            msgData.channel,
-            tostring(msgData.steamId),
-            msgData.username,
-            msgData.characterName,
-            escapedMsg,
+            jsonEscapeField(msgData.channel),
+            jsonEscapeField(msgData.steamId),
+            jsonEscapeField(msgData.username),
+            jsonEscapeField(msgData.characterName),
+            jsonEscapeField(msgData.message),
             msgData.coords.x,
             msgData.coords.y,
             msgData.coords.z
@@ -822,13 +859,13 @@ local function logMessage(msgData)
         logLine = string.format(
             "%s [%s] %s (%s): %s",
             time,
-            msgData.channel,
-            msgData.username,
-            msgData.characterName,
-            msgData.message
+            plainLogField(msgData.channel),
+            plainLogField(msgData.username),
+            plainLogField(msgData.characterName),
+            plainLogField(msgData.message)
         )
     end
-    
+
     -- Guarded: an unprotected getFileWriter/writeln/close that throws would
     -- unwind straight out of buildAndLog, aborting the WHOLE pipeline before
     -- routeProximity/routeRadio ever run -- a bad log write would silently
@@ -850,23 +887,24 @@ end
 
 local function logRadioMessage(msgData, frequency, degradedMessage)
     if not TAZC_Config.Log.enabled then return end
-    
-    local serverName = TAZC_Core.safe(function() return getServerName() end, "unknown") or "unknown"
+
+    local serverName = safeServerNameForPath(
+        TAZC_Core.safe(function() return getServerName() end, "unknown"))
     local date = os.date("%Y-%m-%d")
     local logPath = TAZC_Config.Log.path .. serverName .. "/radio-" .. date .. ".log"
-    
+
     local time = os.date("%H:%M:%S", msgData.timestamp)
     local freqStr = string.format("%.2f", frequency / 1000)
     local messageToLog = degradedMessage or msgData.message
-    
+
     local logLine = string.format(
         "%s [%s] %s (%s)[%sHz]: %s",
         time,
-        msgData.channel,
-        msgData.characterName,
-        msgData.username,
+        plainLogField(msgData.channel),
+        plainLogField(msgData.characterName),
+        plainLogField(msgData.username),
         freqStr,
-        messageToLog
+        plainLogField(messageToLog)
     )
     
     -- Guarded for the same reason as logMessage above: a throwing writer
@@ -899,28 +937,32 @@ end
 local function logRadioRelay(msgData, frequency, degradedMessage, cleanMessage)
     if not TAZC_Config.Log.enabled then return end
 
-    local serverName = TAZC_Core.safe(function() return getServerName() end, "unknown") or "unknown"
+    local serverName = safeServerNameForPath(
+        TAZC_Core.safe(function() return getServerName() end, "unknown"))
     local date = os.date("%Y-%m-%d")
     local logPath = TAZC_Config.Log.path .. serverName .. "/radio-relay-" .. date .. ".log"
 
     local time = os.date("%H:%M:%S", msgData.timestamp)
     local freqStr = string.format("%.2f", frequency / 1000)
-    -- Strip control chars from BOTH fields. corruptWords collapses INTERIOR
-    -- whitespace to single spaces, but re-prepends the message's ORIGINAL
-    -- leading/trailing whitespace (TAZC_Radio.corruptWords) -- which for a
+    -- Strip control chars from BOTH message fields (via the shared
+    -- plainLogField helper). corruptWords collapses INTERIOR whitespace to
+    -- single spaces, but re-prepends the message's ORIGINAL leading/
+    -- trailing whitespace (TAZC_Radio.corruptWords) which for a
     -- tampered/pasted client could be a TAB (breaking the delimiter) or a
     -- newline (breaking the bridge's line-based parse). Radio text never
     -- legitimately carries edge control chars, so this is invisible in the
-    -- happy path and keeps the line unambiguous either way.
-    local degraded = (degradedMessage or msgData.message or ""):gsub("[%c]", "")
-    local clean = (cleanMessage or msgData.message or ""):gsub("[%c]", "")
+    -- happy path and keeps the line unambiguous either way. channel/
+    -- characterName/username go through the same helper for the same
+    -- reason a name could otherwise forge a fake extra log line.
+    local degraded = plainLogField(degradedMessage or msgData.message or "")
+    local clean = plainLogField(cleanMessage or msgData.message or "")
 
     local logLine = string.format(
         "%s [%s] %s (%s)[%sHz]: %s\t%s",
         time,
-        msgData.channel,
-        msgData.characterName,
-        msgData.username,
+        plainLogField(msgData.channel),
+        plainLogField(msgData.characterName),
+        plainLogField(msgData.username),
         freqStr,
         degraded,
         clean
@@ -942,6 +984,155 @@ local function logRadioRelay(msgData, frequency, degradedMessage, cleanMessage)
     else
         dbg("logRadioRelay: wrote to %s", logPath)
     end
+end
+
+-- ============================================================================
+-- MODERATION LOG (added 2026-09-17)
+--
+-- Appends one JSON line per identity-writing action (character rename,
+-- tagline/bio, character-sheet description, or a note written about
+-- another character) to a plain outbox file, so an external bot can tail
+-- it into a private staff-only Discord channel -- staff aren't always
+-- logged into the game to see this happen live. Same file-based-bridge
+-- idea as TAZC_Bridge's outbox.txt (PZ server Lua can't open sockets), and
+-- reuses this file's own jsonEscapeField/safeServerNameForPath helpers so
+-- a crafted name/tagline/note can't corrupt the line, same fix as
+-- logMessage's.
+--
+-- One-way (game -> Discord) only -- nothing reads this back into the game.
+-- Deliberately a SEPARATE file from the 100MHz radio outbox: different
+-- audience (staff-only moderation channel vs. the public radio-relay
+-- channel), different bot loop, different retention expectations.
+-- ============================================================================
+
+local MODLOG_FILE = "TAZC/discordbridge/modlog-outbox.txt"
+
+-- Best-effort "Forename Surname" for the acting player, for context on a
+-- log line -- never lets a read failure block the save it's logging.
+local function currentCharacterNameFor(player)
+    local desc = TAZC_Core.safe(function() return player:getDescriptor() end, nil)
+    if not desc then return "" end
+    local forename = TAZC_Core.safe(function() return desc:getForename() end, "") or ""
+    local surname = TAZC_Core.safe(function() return desc:getSurname() end, "") or ""
+    return (forename .. " " .. surname):match("^%s*(.-)%s*$") or ""
+end
+
+local function appendModLog(kind, fields)
+    if not TAZC_Config.Log.enabled then return end
+
+    local line = string.format(
+        '{"ts":%d,"kind":"%s","user":"%s","char":"%s","target":"%s","text":"%s"}',
+        os.time(),
+        jsonEscapeField(kind),
+        jsonEscapeField(fields.username),
+        jsonEscapeField(fields.characterName),
+        jsonEscapeField(fields.target),
+        jsonEscapeField(fields.text)
+    )
+
+    -- Guarded the same way logMessage/logRadioMessage are: a throwing
+    -- writer must not abort the save it's logging.
+    local ok, err = pcall(function()
+        local file = getFileWriter(MODLOG_FILE, true, true)
+        if file then
+            file:writeln(line)
+            file:close()
+        end
+    end)
+    if not ok then
+        print(string.format(
+            "[TAZC][SERVER] WARNING: appendModLog failed to write %s: %s",
+            MODLOG_FILE, tostring(err)))
+    end
+end
+
+-- Marker file for the one-time backfill below -- its mere existence means
+-- "already ran," across every future restart. A plain touch file, not a
+-- TAZC_Persist store: this is a single forever-true bit, not versioned
+-- data worth an A/B generation scheme.
+local MODLOG_BACKFILL_MARKER = "TAZC/discordbridge/modlog-backfill-done.marker"
+
+--[[
+    Runs ONCE, automatically, the first time this build boots on a server --
+    never as a repeatable command (a standing "dump everything again"
+    command has no ongoing purpose once live saves are already flowing
+    through appendModLog, and invites exactly the "someone reruns it and
+    floods the channel" problem it'd otherwise create). Exports every
+    EXISTING bio, character description, and note-about-someone through
+    the same appendModLog pipe live saves use, so a moderation channel
+    connected after the mod's already been running isn't blind to
+    everything that happened before it was wired up.
+
+    Replays current state, not history -- there's no log of past edits to
+    replay, only what's on disk right now (e.g. a tagline changed twice
+    only shows up once, as its current text).
+
+    Most accounts here are OFFLINE (this is existing data, not something
+    happening live), so there's no IsoPlayer to read a character name
+    from the way the live hooks do; entries go out username-only. The
+    bot's formatter already handles a blank character name gracefully.
+
+    Registered on OnServerStarted AFTER the per-store load hooks (see the
+    ordering note by TAZC_Acquisition's own OnServerStarted registration
+    below) so TAZC_BioDB/TAZC_Desc/TAZC_Notes are already populated from
+    disk by the time this reads them.
+]]
+local function runModLogBackfillOnce()
+    if not TAZC_Config.Log.enabled then return end
+
+    local alreadyRan = TAZC_Core.safe(function()
+        local reader = getFileReader(MODLOG_BACKFILL_MARKER, false)
+        if reader then reader:close(); return true end
+        return false
+    end, false)
+    if alreadyRan then return end
+
+    local counts = { bio = 0, desc = 0, note = 0 }
+
+    for username, tagline in pairs(TAZC_BioDB.taglines) do
+        if type(tagline) == "string" and tagline ~= "" then
+            appendModLog("bio", { username = username, characterName = "", text = tagline })
+            counts.bio = counts.bio + 1
+        end
+    end
+
+    for username, description in pairs(TAZC_Desc.db.descriptions) do
+        if type(description) == "string" and description ~= "" then
+            appendModLog("desc", { username = username, characterName = "", text = description })
+            counts.desc = counts.desc + 1
+        end
+    end
+
+    for author, targets in pairs(TAZC_Notes.db.notes) do
+        for target, text in pairs(targets) do
+            if type(text) == "string" and text ~= "" then
+                appendModLog("note", {
+                    username = author, characterName = "", target = target, text = text
+                })
+                counts.note = counts.note + 1
+            end
+        end
+    end
+
+    -- Write the marker LAST, only after every entry above succeeded --
+    -- if the server crashes mid-backfill, the next boot retries the whole
+    -- thing rather than silently leaving it half-done forever. Reusing
+    -- appendModLog means a partial retry re-sends already-sent entries,
+    -- but a duplicate line in a moderation log is a trivial cost next to
+    -- silently missing entries forever.
+    pcall(function()
+        local writer = getFileWriter(MODLOG_BACKFILL_MARKER, true, true)
+        if writer then
+            writer:writeln(string.format(
+                "backfilled at %d: %d bio(s), %d description(s), %d note(s)",
+                os.time(), counts.bio, counts.desc, counts.note))
+            writer:close()
+        end
+    end)
+
+    print(string.format(
+        "[TAZC][SERVER] One-time modlog backfill complete: %d bio(s), %d description(s), %d note(s)",
+        counts.bio, counts.desc, counts.note))
 end
 
 -- ============================================================================
@@ -2213,12 +2404,16 @@ ServerCommands.BioSave = function(player, args)
     -- Store in memory cache
     TAZC_BioDB.taglines[username] = tagline
     dbg("BioSave: %s = '%s'", username, tagline)
-    
+
     -- Write directly to disk
     saveTaglinesToDisk()
-    
+
     -- Broadcast to all online players so they update their caches
     broadcastToAll("BioUpdate", { username = username, tagline = tagline })
+
+    appendModLog("bio", {
+        username = username, characterName = currentCharacterNameFor(player), text = tagline
+    })
 end
 
 ServerCommands.BioLoad = function(player, args)
@@ -2270,6 +2465,12 @@ ServerCommands.NameSave = function(player, args)
 
     dbg("NameSave: %s renamed, broadcasting refresh", username)
     broadcastToAll("NameUpdate", { username = username })
+
+    -- By this point the client has already applied setForename/setSurname
+    -- and synced via sendPlayerStatsChange (see TAZC_Bio.saveName), so the
+    -- server's own copy of the descriptor already reflects the NEW name.
+    local newName = currentCharacterNameFor(player)
+    appendModLog("name", { username = username, characterName = newName, text = newName })
 end
 
 -- ============================================================================
@@ -2300,6 +2501,10 @@ ServerCommands.DescSave = function(player, args)
 
     -- Broadcast so every online client updates its cache.
     broadcastToAll("DescUpdate", { username = username, description = description })
+
+    appendModLog("desc", {
+        username = username, characterName = currentCharacterNameFor(player), text = description
+    })
 end
 
 ServerCommands.DescLoad = function(player, args)
@@ -2349,6 +2554,16 @@ ServerCommands.NoteSave = function(player, args)
     dbg("NoteSave: %s about %s (%d chars)", viewer, target, #note)
     -- Confirm to the author only (private).
     sendServerCommand(player, "TAZC", "NoteData", { target = target, note = note })
+
+    -- Only log an actual note being written, not a clear (note == "") --
+    -- clears aren't the moderation-relevant case this log exists for, and
+    -- would just be noise.
+    if note ~= "" then
+        appendModLog("note", {
+            username = viewer, characterName = currentCharacterNameFor(player),
+            target = target, text = note
+        })
+    end
 end
 
 ServerCommands.NoteLoad = function(player, args)
@@ -2363,13 +2578,64 @@ ServerCommands.NoteLoad = function(player, args)
     sendServerCommand(player, "TAZC", "NoteData", { target = target, note = note })
 end
 
--- Sent by a client that detects its own fresh character: a new character is a
--- new person, so wipe this identity's whole note graph -- the notes they wrote
--- about others AND everyone's notes about them. Keyed off the sender, so a
--- client can only ever reset ITSELF.
-ServerCommands.NoteClearAbout = function(player, args)
-    if not player then return end
-    local target = TAZC_Core.safe(function() return player:getUsername() end, nil)
+-- ============================================================================
+-- ADMIN NOTE MODERATION (added 2026-09-17, replaces NoteClearAbout)
+--
+-- NoteClearAbout used to let ANY client wipe its own note graph (outgoing
+-- notes about others + everyone's notes about it) on request, fired
+-- automatically by the client on what it believed was a fresh character.
+-- Removed entirely: nothing server-side actually verified the caller was
+-- a genuine fresh character, so a modified client could call it mid-life
+-- to erase notes other players wrote about it -- defeating the point of
+-- private notes as a moderation/reputation signal. It also would have
+-- conflicted with a planned respawn/lives system where a new life is
+-- mechanically a new character but NOT a new identity (standing carries
+-- over), which needs notes to survive exactly the respawns this command
+-- would have wiped.
+--
+-- Both commands below take a raw account USERNAME (not a forename/online-
+-- roster lookup like /lang grant uses) so staff can review or clear a
+-- currently-offline account's history too, not only someone online right
+-- now. Admin-gated server-side via TAZC_Core.isAdmin -- the client's own
+-- localAccessLevel() check in TAZC_Input.lua is a cosmetic early-out only.
+-- ============================================================================
+
+ServerCommands.AdminViewNotesAbout = function(player, args)
+    if not player or type(args) ~= "table" then return end
+    if not TAZC_Core.isAdmin(player) then
+        sendServerCommand(player, "TAZC", "SystemMessage", {
+            message = "/notes view is admin-only.", color = {255, 100, 100}
+        })
+        return
+    end
+    local target = validString(args.target, 64)
+    if not target then return end
+
+    local entries = {}
+    for author, targets in pairs(TAZC_Notes.db.notes) do
+        local text = targets[target]
+        if text then
+            entries[#entries + 1] = { author = author, text = text }
+        end
+    end
+    table.sort(entries, function(a, b) return a.author < b.author end)
+
+    dbg("AdminViewNotesAbout: %s viewed %d note(s) about %s",
+        TAZC_Core.safe(function() return player:getUsername() end, "?"), #entries, target)
+    sendServerCommand(player, "TAZC", "AdminNotesAboutResult", {
+        target = target, entries = entries
+    })
+end
+
+ServerCommands.AdminClearNotesAbout = function(player, args)
+    if not player or type(args) ~= "table" then return end
+    if not TAZC_Core.isAdmin(player) then
+        sendServerCommand(player, "TAZC", "SystemMessage", {
+            message = "/notes clear is admin-only.", color = {255, 100, 100}
+        })
+        return
+    end
+    local target = validString(args.target, 64)
     if not target then return end
 
     local changed = false
@@ -2383,10 +2649,19 @@ ServerCommands.NoteClearAbout = function(player, args)
             changed = true
         end
     end
+
+    local adminUsername = TAZC_Core.safe(function() return player:getUsername() end, "?")
     if changed then
         TAZC_Notes.saveToDisk()
         broadcastNoteAboutCleared(target)
-        dbg("NoteClearAbout: reset note graph for %s (fresh character)", target)
+        dbg("AdminClearNotesAbout: %s cleared note graph for %s", adminUsername, target)
+        sendServerCommand(player, "TAZC", "SystemMessage", {
+            message = "Cleared the note graph for '" .. target .. "'.", color = {100, 255, 100}
+        })
+    else
+        sendServerCommand(player, "TAZC", "SystemMessage", {
+            message = "'" .. target .. "' had no notes to clear.", color = {200, 200, 200}
+        })
     end
 end
 
@@ -2650,5 +2925,13 @@ TAZC_Server._SlashHandlers = SLASH_HANDLERS
 -- on another's having already run, so registering last is safe.
 Events.OnServerStarted.Add(TAZC_Acquisition.onServerStarted)
 Events.EveryOneMinute.Add(TAZC_Acquisition.onEveryOneMinute)
+
+-- Registered last, deliberately: needs TAZC_BioDB/TAZC_Desc/TAZC_Notes
+-- already populated from disk, which happens in the per-store
+-- OnServerStarted hooks registered earlier in this file (see makeStore).
+-- Self-disabling after one run (MODLOG_BACKFILL_MARKER) -- see
+-- runModLogBackfillOnce's own doc comment for why this is a boot-time
+-- one-shot and not a repeatable command.
+Events.OnServerStarted.Add(runModLogBackfillOnce)
 
 return TAZC_Server
